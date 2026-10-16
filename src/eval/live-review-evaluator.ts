@@ -315,8 +315,15 @@ export interface LiveReviewEvaluatorOptions {
    * server restarted or dropped the connection). Default 15 s.
    */
   transportRetryDelayMs?: number;
+  /** Reports from an earlier, interrupted run; those cases are not rerun. */
+  completedCases?: LiveCaseReport[];
   onCaseStart?: (fixture: LiveEvaluationFixture, index: number) => void;
-  onCaseDone?: (report: LiveCaseReport, index: number) => void;
+  /** Awaited, so callers can persist progress after every case. */
+  onCaseDone?: (
+    report: LiveCaseReport,
+    index: number,
+    casesSoFar: LiveCaseReport[],
+  ) => void | Promise<void>;
 }
 
 export class LiveReviewEvaluator {
@@ -334,15 +341,23 @@ export class LiveReviewEvaluator {
       this.#options.engineOptions ?? {},
     );
     const cases: LiveCaseReport[] = [];
+    const completed = new Map(
+      (this.#options.completedCases ?? []).map((entry) => [entry.name, entry]),
+    );
 
     for (const [index, fixture] of fixtures.entries()) {
+      const previous = completed.get(fixture.name);
+      if (previous) {
+        cases.push(previous);
+        continue;
+      }
       this.#options.onCaseStart?.(fixture, index);
       const report = await this.#evaluateCase(engine, fixture);
       cases.push(report);
-      this.#options.onCaseDone?.(report, index);
+      await this.#options.onCaseDone?.(report, index, cases);
     }
 
-    return { cases, totals: summarize(cases) };
+    return { cases, totals: summarizeReport(cases) };
   }
 
   async #evaluateCase(
@@ -521,7 +536,7 @@ export function rescoreReport(
     };
     return [rescored];
   });
-  return { cases, totals: summarize(cases) };
+  return { cases, totals: summarizeReport(cases) };
 }
 
 function median(values: number[]): number {
@@ -605,7 +620,9 @@ function groupBy(
   );
 }
 
-function summarize(cases: LiveCaseReport[]): LiveEvaluationReport["totals"] {
+export function summarizeReport(
+  cases: LiveCaseReport[],
+): LiveEvaluationReport["totals"] {
   return {
     ...summarizeCases(cases),
     byStack: groupBy(cases, (entry) => entry.stack),

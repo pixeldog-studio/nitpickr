@@ -192,3 +192,51 @@ describe("rescoreReport", () => {
     expect(rescored.cases[0]?.unexpected).toEqual([]);
   });
 });
+
+describe("resuming a run", () => {
+  it("reuses completed cases and only runs the rest", async () => {
+    const { LiveReviewEvaluator } = await import(
+      "../../src/eval/live-review-evaluator.js"
+    );
+    let calls = 0;
+    const fixture = (name: string) => ({
+      name,
+      kind: "clean" as const,
+      stack: "typescript" as const,
+      expectedVerdicts: [],
+      expectedFindings: [],
+      input: {
+        changeRequest: { title: "t", number: 1 },
+        files: [
+          {
+            path: "a.ts",
+            additions: 1,
+            deletions: 0,
+            patch: "@@ -0,0 +1 @@\n+x",
+          },
+        ],
+        instructionText: "",
+        memory: [],
+        commentBudget: 5,
+        priorReviewRoundCount: 0,
+      },
+    });
+    const progress: number[] = [];
+    const result = await new LiveReviewEvaluator({
+      completedCases: [report({ name: "done" })],
+      model: {
+        async generateStructuredReview() {
+          calls += 1;
+          return { summary: "s", findings: [] };
+        },
+      },
+      onCaseDone: (_report, _index, soFar) => {
+        progress.push(soFar.length);
+      },
+    }).evaluate([fixture("done"), fixture("todo")] as never);
+
+    expect(calls).toBe(1);
+    expect(result.cases.map((entry) => entry.name)).toEqual(["done", "todo"]);
+    expect(progress).toEqual([2]);
+  });
+});

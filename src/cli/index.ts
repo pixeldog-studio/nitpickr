@@ -98,6 +98,7 @@ async function main(): Promise<void> {
               : { maxFindings: bootstrap.models.verifierMaxFindings },
         },
         startedAt: new Date().toISOString(),
+        ...(flagBoolean(args, "resume") ? { resume: true } : {}),
         ...(flagString(args, "commit")
           ? { gitCommit: flagString(args, "commit") as string }
           : {}),
