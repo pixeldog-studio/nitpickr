@@ -166,6 +166,11 @@ export function formatReconsiderReply(outcome: VerificationOutcome): {
         body: `I can't confirm it from the code I can see (${outcome.reason}). Resolve it if it doesn't apply here.`,
         resolve: false,
       };
+    case "unverified":
+      return {
+        body: `I couldn't re-check it just now (${outcome.reason}). Try \`reconsider\` again in a bit, or resolve it if it doesn't apply.`,
+        resolve: false,
+      };
   }
 }
 
