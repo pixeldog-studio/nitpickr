@@ -1,0 +1,33 @@
+{
+  "name": "ts-sql-string-interpolation",
+  "source": "synthetic",
+  "kind": "planted",
+  "stack": "typescript",
+  "expectedVerdicts": [],
+  "input": {
+    "changeRequest": {
+      "title": "Search users by name",
+      "number": 100
+    },
+    "files": [
+      {
+        "path": "src/users/search.ts",
+        "additions": 14,
+        "deletions": 0,
+        "patch": "@@ -0,0 +1,14 @@\n+import type { Pool } from \"pg\";\n+\n+export interface UserRow {\n+  id: string;\n+  name: string;\n+  email: string;\n+}\n+\n+export async function searchUsers(pool: Pool, term: string): Promise<UserRow[]> {\n+  const result = await pool.query<UserRow>(\n+    `select id, name, email from users where name ilike '%${term}%' order by name limit 50`,\n+  );\n+  return result.rows;\n+}",
+        "fileContent": "import type { Pool } from \"pg\";\n\nexport interface UserRow {\n  id: string;\n  name: string;\n  email: string;\n}\n\nexport async function searchUsers(pool: Pool, term: string): Promise<UserRow[]> {\n  const result = await pool.query<UserRow>(\n    `select id, name, email from users where name ilike '%${term}%' order by name limit 50`,\n  );\n  return result.rows;\n}\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10
+  },
+  "expectedFindings": [
+    {
+      "label": "SQL injection: search term interpolated into the query",
+      "path": "src/users/search.ts",
+      "lineStart": 11,
+      "lineEnd": 11
+    }
+  ]
+}

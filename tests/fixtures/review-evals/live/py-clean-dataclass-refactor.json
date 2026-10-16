@@ -1,0 +1,26 @@
+{
+  "name": "py-clean-dataclass-refactor",
+  "source": "synthetic",
+  "kind": "clean",
+  "stack": "python",
+  "expectedVerdicts": [],
+  "input": {
+    "changeRequest": {
+      "title": "Use a dataclass for digest settings",
+      "number": 100
+    },
+    "files": [
+      {
+        "path": "automation/digest/settings.py",
+        "additions": 7,
+        "deletions": 6,
+        "patch": "@@ -1,17 +1,18 @@\n import os\n+from dataclasses import dataclass\n \n \n+@dataclass(frozen=True)\n class DigestSettings:\n-    def __init__(self, recipients, send_hour, timezone):\n-        self.recipients = recipients\n-        self.send_hour = send_hour\n-        self.timezone = timezone\n+    recipients: tuple[str, ...]\n+    send_hour: int\n+    timezone: str\n \n \n-def load_settings():\n+def load_settings() -> DigestSettings:\n     recipients = os.environ.get(\"DIGEST_RECIPIENTS\", \"\").split(\",\")\n     return DigestSettings(\n-        recipients=[r.strip() for r in recipients if r.strip()],\n+        recipients=tuple(r.strip() for r in recipients if r.strip()),\n         send_hour=int(os.environ.get(\"DIGEST_SEND_HOUR\", \"7\")),\n         timezone=os.environ.get(\"DIGEST_TZ\", \"Europe/Berlin\"),\n     )",
+        "fileContent": "import os\nfrom dataclasses import dataclass\n\n\n@dataclass(frozen=True)\nclass DigestSettings:\n    recipients: tuple[str, ...]\n    send_hour: int\n    timezone: str\n\n\ndef load_settings() -> DigestSettings:\n    recipients = os.environ.get(\"DIGEST_RECIPIENTS\", \"\").split(\",\")\n    return DigestSettings(\n        recipients=tuple(r.strip() for r in recipients if r.strip()),\n        send_hour=int(os.environ.get(\"DIGEST_SEND_HOUR\", \"7\")),\n        timezone=os.environ.get(\"DIGEST_TZ\", \"Europe/Berlin\"),\n    )\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10
+  },
+  "expectedFindings": []
+}

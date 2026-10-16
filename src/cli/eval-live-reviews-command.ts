@@ -5,6 +5,7 @@ import type { ReasoningEffort } from "../config/app-config.js";
 import {
   type LiveCaseReport,
   type LiveEvaluationReport,
+  type LiveEvaluationTotals,
   LiveReviewEvaluator,
   loadLiveEvaluationFixtures,
   UsageTracker,
@@ -31,6 +32,8 @@ export interface EvalLiveReviewsInput {
   write?: (line: string) => void;
   /** Stamped into the report; passed in so callers control clock access. */
   startedAt?: string;
+  /** Commit under test, stamped into the report for baseline comparisons. */
+  gitCommit?: string;
 }
 
 export const DEFAULT_LIVE_FIXTURE_DIRECTORY =
@@ -54,6 +57,21 @@ function formatCase(report: LiveCaseReport): string {
     `  ${report.name}: recall ${pct(report.recall)} precision ${pct(report.precision)}`,
     `matched ${report.matched.length} missed ${report.missed.length} unexpected ${report.unexpected.length}`,
     `${seconds(report.durationMs)} ${report.chunkCount} chunk(s) ${tokens} ${status}`,
+  ].join(" | ");
+}
+
+function formatTotals(label: string, totals: LiveEvaluationTotals): string {
+  return [
+    `${label}: cases ${totals.cases}`,
+    `precision(medium+) ${pct(totals.precisionMediumPlus)}`,
+    `precision ${pct(totals.precision)} (${totals.matched}/${totals.published})`,
+    `recall ${pct(totals.recall)} (${totals.matched}/${totals.expected})`,
+    `nits ${totals.nitCount}`,
+    `clean-case FPs ${totals.cleanCaseFalsePositives}`,
+    `verdicts ${totals.verdictAccuracy === null ? "n/a" : pct(totals.verdictAccuracy)}`,
+    `median ${seconds(totals.medianCaseMs)}`,
+    `total ${seconds(totals.durationMs)}`,
+    `failed ${totals.failedCases}`,
   ].join(" | ");
 }
 
@@ -121,9 +139,15 @@ export class EvalLiveReviewsCommand {
     const report = await evaluator.evaluate(fixtures);
     const totals = report.totals;
     write("");
-    write(
-      `Totals: recall ${pct(totals.recall)} (${totals.matched}/${totals.expected}) | precision ${pct(totals.precision)} (${totals.matched}/${totals.published}) | unexpected ${totals.unexpected} | failed cases ${totals.failedCases} | wall-clock ${seconds(totals.durationMs)}${totals.promptTokens === null ? "" : ` | tokens ${totals.promptTokens}+${totals.completionTokens ?? 0}`}`,
-    );
+    write(formatTotals("Totals", totals));
+    for (const [group, entries] of [
+      ["stack", totals.byStack],
+      ["kind", totals.byKind],
+    ] as const) {
+      for (const [name, entry] of Object.entries(entries)) {
+        write(formatTotals(`  ${group}=${name}`, entry));
+      }
+    }
 
     if (input.outFile) {
       const payload = {
@@ -131,6 +155,7 @@ export class EvalLiveReviewsCommand {
         baseUrl: input.baseUrl,
         reasoningEffort: input.reasoningEffort ?? null,
         startedAt: input.startedAt ?? null,
+        gitCommit: input.gitCommit ?? null,
         fixtureDirectory: directory,
         ...report,
       };

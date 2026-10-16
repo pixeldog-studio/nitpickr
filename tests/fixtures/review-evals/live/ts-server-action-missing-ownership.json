@@ -1,0 +1,33 @@
+{
+  "name": "ts-server-action-missing-ownership",
+  "source": "synthetic",
+  "kind": "planted",
+  "stack": "typescript",
+  "expectedVerdicts": [],
+  "input": {
+    "changeRequest": {
+      "title": "Add delete action for saved scans",
+      "number": 100
+    },
+    "files": [
+      {
+        "path": "app/scans/actions.ts",
+        "additions": 16,
+        "deletions": 0,
+        "patch": "@@ -0,0 +1,16 @@\n+\"use server\";\n+\n+import { revalidatePath } from \"next/cache\";\n+\n+import { getSession } from \"@/lib/auth\";\n+import { db } from \"@/lib/db\";\n+\n+export async function deleteScan(scanId: string) {\n+  const session = await getSession();\n+  if (!session) {\n+    throw new Error(\"Not signed in\");\n+  }\n+\n+  await db.scan.delete({ where: { id: scanId } });\n+  revalidatePath(\"/scans\");\n+}",
+        "fileContent": "\"use server\";\n\nimport { revalidatePath } from \"next/cache\";\n\nimport { getSession } from \"@/lib/auth\";\nimport { db } from \"@/lib/db\";\n\nexport async function deleteScan(scanId: string) {\n  const session = await getSession();\n  if (!session) {\n    throw new Error(\"Not signed in\");\n  }\n\n  await db.scan.delete({ where: { id: scanId } });\n  revalidatePath(\"/scans\");\n}\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10
+  },
+  "expectedFindings": [
+    {
+      "label": "any signed-in user can delete any scan: no ownership check (IDOR)",
+      "path": "app/scans/actions.ts",
+      "lineStart": 14,
+      "lineEnd": 14
+    }
+  ]
+}

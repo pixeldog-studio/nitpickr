@@ -1,0 +1,26 @@
+{
+  "name": "swift-clean-observable-migration",
+  "source": "synthetic",
+  "kind": "clean",
+  "stack": "swift",
+  "expectedVerdicts": [],
+  "input": {
+    "changeRequest": {
+      "title": "Migrate SettingsStore to @Observable",
+      "number": 100
+    },
+    "files": [
+      {
+        "path": "App/Settings/SettingsStore.swift",
+        "additions": 5,
+        "deletions": 4,
+        "patch": "@@ -1,12 +1,13 @@\n-import Combine\n import Foundation\n+import Observation\n \n-final class SettingsStore: ObservableObject {\n-    @Published var prefersMetricUnits: Bool {\n+@Observable\n+final class SettingsStore {\n+    var prefersMetricUnits: Bool {\n         didSet { defaults.set(prefersMetricUnits, forKey: Keys.metric) }\n     }\n \n-    private let defaults: UserDefaults\n+    @ObservationIgnored private let defaults: UserDefaults\n \n     init(defaults: UserDefaults = .standard) {\n         self.defaults = defaults",
+        "fileContent": "import Foundation\nimport Observation\n\n@Observable\nfinal class SettingsStore {\n    var prefersMetricUnits: Bool {\n        didSet { defaults.set(prefersMetricUnits, forKey: Keys.metric) }\n    }\n\n    @ObservationIgnored private let defaults: UserDefaults\n\n    init(defaults: UserDefaults = .standard) {\n        self.defaults = defaults\n        self.prefersMetricUnits = defaults.bool(forKey: Keys.metric)\n    }\n\n    private enum Keys {\n        static let metric = \"settings.prefersMetricUnits\"\n    }\n}\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10
+  },
+  "expectedFindings": []
+}

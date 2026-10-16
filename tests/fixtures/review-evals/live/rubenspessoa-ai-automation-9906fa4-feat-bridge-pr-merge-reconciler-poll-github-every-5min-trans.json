@@ -1,0 +1,42 @@
+{
+  "name": "rubenspessoa-ai-automation-9906fa4-feat-bridge-pr-merge-reconciler-poll-github-every-5min-trans",
+  "source": "https://github.com/rubenspessoa/ai-automation/commit/9906fa43c84833c8d695824e82a24e47b45761a3",
+  "kind": "captured_bug",
+  "stack": "python",
+  "expectedVerdicts": [],
+  "input": {
+    "changeRequest": {
+      "title": "feat(bridge): PR-merge reconciler \u2014 poll GitHub every 5min, transition workflows to MERGED",
+      "number": 1
+    },
+    "files": [
+      {
+        "path": "crew/chat_bridge/main.py",
+        "additions": 120,
+        "deletions": 0,
+        "patch": "@@ -183,6 +183,14 @@ async def on_ready(self) -> None:\n             self._did_resume_scan = True\n             asyncio.create_task(self._scan_for_missed_resumes())\n \n+        # Periodic external-state reconciliation: poll GitHub for merged PRs\n+        # across project surfaces and bring state.db into agreement. Without\n+        # this, human/auto merges never reach the workflow row and tickets\n+        # appear \"stuck\" forever.\n+        if not getattr(self, \"_did_pr_reconcile_start\", False):\n+            self._did_pr_reconcile_start = True\n+            asyncio.create_task(self._reconcile_merged_prs_loop())\n+\n     async def _reconcile_orphans(self) -> None:\n         \"\"\"At boot: every IN_PROGRESS workflow row is orphaned by definition \u2014\n         the orchestrator subprocesses were children of the previous bridge\n@@ -251,6 +259,118 @@ async def _reconcile_orphans(self) -> None:\n                 f\"`{ticket}` in #pm-protagonist to resume.\",\n             )\n \n+    async def _reconcile_merged_prs_loop(self) -> None:\n+        \"\"\"Periodic wrapper around _reconcile_merged_prs_once. Lives for the\n+        bridge's lifetime. 5-min interval matches the address-pr-comments cron\n+        cadence \u2014 fast enough to catch merges before the human notices state\n+        drift, slow enough to not hammer GitHub's rate limits.\"\"\"\n+        while True:\n+            try:\n+                await self._reconcile_merged_prs_once()\n+            except Exception as e:\n+                log.warning(\"bridge.pr_reconcile_loop_failed\", error=str(e))\n+            await asyncio.sleep(300)\n+\n+    async def _reconcile_merged_prs_once(self) -> None:\n+        \"\"\"One sweep: for each project surface, ask GitHub which FRO-prefixed\n+        PRs are merged, and transition the matching workflow row to MERGED if\n+        it isn't already. Compensates for the fact that nothing in-process\n+        watches for human/auto merges \u2014 the state machine was previously a\n+        one-way street toward DONE/BLOCKED only.\"\"\"\n+        projects = _load_config().get(\"projects\", {})\n+        if not isinstance(projects, dict):\n+            return\n+\n+        repo_paths: list[Path] = []\n+        for _, p_cfg in projects.items():\n+            if not isinstance(p_cfg, dict):\n+                continue\n+            surfaces = p_cfg.get(\"surfaces\")\n+            if isinstance(surfaces, dict):\n+                for s_cfg in surfaces.values():\n+                    if isinstance(s_cfg, dict) and isinstance(s_cfg.get(\"path\"), str):\n+                        repo_paths.append(Path(s_cfg[\"path\"]))\n+            elif isinstance(p_cfg.get(\"path\"), str):\n+                repo_paths.append(Path(p_cfg[\"path\"]))\n+\n+        # De-dup \u2014 multi-surface configs with shared paths are conceivable.\n+        seen: set[str] = set()\n+        for repo_path in repo_paths:\n+            key = str(repo_path)\n+            if key in seen:\n+                continue\n+            seen.add(key)\n+            if not (repo_path / \".git\").exists():\n+                continue\n+            try:\n+                proc = await asyncio.create_subprocess_exec(\n+                    \"gh\", \"pr\", \"list\",\n+                    \"--state\", \"merged\",\n+                    \"--search\", \"in:title FRO-\",\n+                    \"--json\", \"number,title,mergedAt\",\n+                    \"--limit\", \"30\",\n+                    cwd=str(repo_path),\n+                    stdout=asyncio.subprocess.PIPE,\n+                    stderr=asyncio.subprocess.PIPE,\n+                )\n+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=20)\n+            except (TimeoutError, FileNotFoundError, OSError) as e:\n+                log.warning(\n+                    \"bridge.pr_reconcile_subprocess_failed\",\n+                    path=key,\n+                    error=str(e),\n+                )\n+                continue\n+            if proc.returncode != 0:\n+                log.warning(\n+                    \"bridge.pr_reconcile_gh_failed\",\n+                    path=key,\n+                    stderr=stderr.decode()[:200],\n+                )\n+                continue\n+            try:\n+                prs = json.loads(stdout.decode() or \"[]\")\n+            except json.JSONDecodeError as e:\n+                log.warning(\"bridge.pr_reconcile_json_failed\", path=key, error=str(e))\n+                continue\n+\n+            for pr in prs:\n+                title = str(pr.get(\"title\", \"\"))\n+                match = TICKET_ID_RE.search(title)\n+                if not match:\n+                    continue\n+                ticket = match.group(0)\n+                current = self.sessions.get_workflow_state(ticket)\n+                if current is None or current == \"MERGED\":\n+                    continue\n+                merged_at = str(pr.get(\"mergedAt\") or \"\")\n+                try:\n+                    self.sessions.conn.execute(\n+                        \"UPDATE workflows SET state='MERGED', ended_at=?, \"\n+                        \"pr_number=COALESCE(pr_number, ?) WHERE ticket=?\",\n+                        (merged_at or datetime.now(timezone.utc).isoformat(),\n+                         pr.get(\"number\"), ticket),\n+                    )\n+                except Exception as e:\n+                    log.warning(\n+                        \"bridge.pr_reconcile_update_failed\",\n+                        task=ticket,\n+                        error=str(e),\n+                    )\n+                    continue\n+                log.info(\n+                    \"bridge.pr_reconciled\",\n+                    task=ticket,\n+                    from_state=current,\n+                    pr_number=pr.get(\"number\"),\n+                    merged_at=merged_at,\n+                )\n+                await self._post_system_alert(\n+                    \"info\",\n+                    f\"`{ticket}` reconciled to MERGED (was `{current}`) \u2014 \"\n+                    f\"PR #{pr.get('number')} merged at {merged_at or 'unknown'}.\",\n+                )\n+\n     async def _scan_for_missed_resumes(self) -> None:\n         \"\"\"Best-effort startup scan: for each parked workflow, scan #pm-protagonist\n         for messages newer than the parking timestamp that mention the ticket ID.",
+        "fileContent": null
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10,
+    "priorReviewRoundCount": 0
+  },
+  "expectedFindings": [
+    {
+      "label": "TimeoutError logged with str(e), which is empty, so the log is unactionable",
+      "path": "crew/chat_bridge/main.py",
+      "lineStart": 317,
+      "lineEnd": 322,
+      "category": "maintainability"
+    },
+    {
+      "label": "gh subprocess is not killed after wait_for times out (leaks the process)",
+      "path": "crew/chat_bridge/main.py",
+      "lineStart": 310,
+      "lineEnd": 322,
+      "category": "correctness"
+    }
+  ]
+}

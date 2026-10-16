@@ -4,9 +4,10 @@ import { join } from "node:path";
 import type { LiveEvaluationFixture } from "../eval/live-review-evaluator.js";
 
 /**
- * `eval:capture owner/repo#123` — snapshot a real pull request into a live
- * eval fixture (patches + file content at HEAD) so it can be replayed against
- * local models. `expectedFindings` is left empty for hand annotation.
+ * `eval:capture owner/repo#123` (or `owner/repo@<sha>` for a commit pushed
+ * without a PR) — snapshot a real change into a live eval fixture (patches +
+ * file content at HEAD) so it can be replayed against local models.
+ * `expectedFindings` is left empty for hand annotation.
  */
 
 export type FetchLike = typeof fetch;
@@ -43,6 +44,26 @@ export function parsePullReference(reference: string): {
   };
 }
 
+const COMMIT_REFERENCE_PATTERN =
+  /^(?:https:\/\/github\.com\/)?([^/\s]+)\/([^/@\s]+)(?:@|\/commit\/)([0-9a-f]{7,40})$/;
+
+export type CaptureReference =
+  | { kind: "pull"; owner: string; repo: string; number: number }
+  | { kind: "commit"; owner: string; repo: string; sha: string };
+
+export function parseCaptureReference(reference: string): CaptureReference {
+  const commit = COMMIT_REFERENCE_PATTERN.exec(reference.trim());
+  if (commit) {
+    return {
+      kind: "commit",
+      owner: commit[1] as string,
+      repo: commit[2] as string,
+      sha: commit[3] as string,
+    };
+  }
+  return { kind: "pull", ...parsePullReference(reference) };
+}
+
 function slugify(value: string): string {
   return value
     .toLowerCase()
@@ -59,6 +80,28 @@ interface PullFile {
   patch?: string;
 }
 
+const stackByExtension: Array<[RegExp, LiveEvaluationFixture["stack"]]> = [
+  [/\.swift$/, "swift"],
+  [/\.(ts|tsx|js|jsx|mjs|cjs|astro)$/, "typescript"],
+  [/\.py$/, "python"],
+  [/\.sql$/, "sql"],
+];
+
+/** The stack with the most changed files; "other" when nothing matches. */
+export function inferStack(paths: string[]): LiveEvaluationFixture["stack"] {
+  const counts = new Map<LiveEvaluationFixture["stack"], number>();
+  for (const path of paths) {
+    const stack = stackByExtension.find(([pattern]) => pattern.test(path))?.[1];
+    if (stack) {
+      counts.set(stack, (counts.get(stack) ?? 0) + 1);
+    }
+  }
+  return (
+    [...counts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] ??
+    "other"
+  );
+}
+
 export class EvalCaptureCommand {
   async run(input: EvalCaptureInput): Promise<string> {
     const write = input.write ?? ((line: string) => console.log(line));
@@ -68,7 +111,8 @@ export class EvalCaptureCommand {
       "",
     );
     const maxBytes = input.maxFileContentBytes ?? 60_000;
-    const { owner, repo, number } = parsePullReference(input.reference);
+    const reference = parseCaptureReference(input.reference);
+    const { owner, repo } = reference;
     const headers = {
       authorization: `Bearer ${input.token}`,
       accept: "application/vnd.github+json",
@@ -84,17 +128,42 @@ export class EvalCaptureCommand {
       return (await response.json()) as T;
     };
 
-    const pull = await get<{ title: string; head: { sha: string } }>(
-      `/repos/${owner}/${repo}/pulls/${number}`,
-    );
+    let title: string;
+    let headSha: string;
+    let number: number;
+    let source: string;
+    let slug: string;
     const files: PullFile[] = [];
-    for (let page = 1; ; page += 1) {
-      const batch = await get<PullFile[]>(
-        `/repos/${owner}/${repo}/pulls/${number}/files?per_page=100&page=${page}`,
+    if (reference.kind === "commit") {
+      const commit = await get<{
+        sha: string;
+        commit: { message: string };
+        files?: PullFile[];
+      }>(`/repos/${owner}/${repo}/commits/${reference.sha}`);
+      title = commit.commit.message.split("\n")[0]?.trim() || commit.sha;
+      headSha = commit.sha;
+      // Commits have no PR number; the fixture schema needs a positive one.
+      number = 1;
+      source = `https://github.com/${owner}/${repo}/commit/${commit.sha}`;
+      slug = `${owner}-${repo}-${commit.sha.slice(0, 7)}-${slugify(title)}`;
+      files.push(...(commit.files ?? []));
+    } else {
+      const pull = await get<{ title: string; head: { sha: string } }>(
+        `/repos/${owner}/${repo}/pulls/${reference.number}`,
       );
-      files.push(...batch);
-      if (batch.length < 100) {
-        break;
+      title = pull.title;
+      headSha = pull.head.sha;
+      number = reference.number;
+      source = `https://github.com/${owner}/${repo}/pull/${number}`;
+      slug = `${owner}-${repo}-${number}-${slugify(title)}`;
+      for (let page = 1; ; page += 1) {
+        const batch = await get<PullFile[]>(
+          `/repos/${owner}/${repo}/pulls/${number}/files?per_page=100&page=${page}`,
+        );
+        files.push(...batch);
+        if (batch.length < 100) {
+          break;
+        }
       }
     }
 
@@ -108,7 +177,7 @@ export class EvalCaptureCommand {
             content?: string;
             size?: number;
           }>(
-            `/repos/${owner}/${repo}/contents/${encodeURIComponent(file.filename).replace(/%2F/g, "/")}?ref=${pull.head.sha}`,
+            `/repos/${owner}/${repo}/contents/${encodeURIComponent(file.filename).replace(/%2F/g, "/")}?ref=${headSha}`,
           );
           if (
             contents.encoding === "base64" &&
@@ -135,14 +204,20 @@ export class EvalCaptureCommand {
     }
 
     const fixture: LiveEvaluationFixture = {
-      name: `${owner}-${repo}-${number}-${slugify(pull.title)}`,
-      source: `https://github.com/${owner}/${repo}/pull/${number}`,
+      name: slug,
+      source,
+      // Captured PRs start as clean; annotate expectedFindings (and switch
+      // kind to captured_bug) when the PR contains a known defect.
+      kind: "captured_clean",
+      stack: inferStack(fixtureFiles.map((file) => file.path)),
+      expectedVerdicts: [],
       input: {
-        changeRequest: { title: pull.title, number },
+        changeRequest: { title, number },
         files: fixtureFiles,
         instructionText: "",
         memory: [],
         commentBudget: 10,
+        priorReviewRoundCount: 0,
       },
       expectedFindings: [],
     };

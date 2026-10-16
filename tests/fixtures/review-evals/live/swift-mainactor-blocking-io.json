@@ -1,0 +1,33 @@
+{
+  "name": "swift-mainactor-blocking-io",
+  "source": "synthetic",
+  "kind": "planted",
+  "stack": "swift",
+  "expectedVerdicts": [],
+  "input": {
+    "changeRequest": {
+      "title": "Load the plant catalog in the view model",
+      "number": 100
+    },
+    "files": [
+      {
+        "path": "App/Catalog/CatalogViewModel.swift",
+        "additions": 20,
+        "deletions": 0,
+        "patch": "@@ -0,0 +1,20 @@\n+import Foundation\n+import Observation\n+\n+@MainActor\n+@Observable\n+final class CatalogViewModel {\n+    private(set) var plants: [Plant] = []\n+    private(set) var errorMessage: String?\n+\n+    private let catalogURL = URL(string: \"https://plants.example.com/catalog.json\")!\n+\n+    func load() {\n+        do {\n+            let data = try Data(contentsOf: catalogURL)\n+            plants = try JSONDecoder().decode([Plant].self, from: data)\n+        } catch {\n+            errorMessage = error.localizedDescription\n+        }\n+    }\n+}",
+        "fileContent": "import Foundation\nimport Observation\n\n@MainActor\n@Observable\nfinal class CatalogViewModel {\n    private(set) var plants: [Plant] = []\n    private(set) var errorMessage: String?\n\n    private let catalogURL = URL(string: \"https://plants.example.com/catalog.json\")!\n\n    func load() {\n        do {\n            let data = try Data(contentsOf: catalogURL)\n            plants = try JSONDecoder().decode([Plant].self, from: data)\n        } catch {\n            errorMessage = error.localizedDescription\n        }\n    }\n}\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10
+  },
+  "expectedFindings": [
+    {
+      "label": "synchronous network read on the main actor freezes the UI",
+      "path": "App/Catalog/CatalogViewModel.swift",
+      "lineStart": 14,
+      "lineEnd": 14
+    }
+  ]
+}

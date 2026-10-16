@@ -1,6 +1,8 @@
 {
   "name": "planted-off-by-one",
   "source": "synthetic",
+  "kind": "planted",
+  "stack": "typescript",
   "input": {
     "changeRequest": {
       "title": "Add pagination helper",

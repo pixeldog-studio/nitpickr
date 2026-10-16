@@ -1,0 +1,44 @@
+{
+  "name": "mr-thread-fixed-by-push",
+  "source": "synthetic",
+  "kind": "multi_round",
+  "stack": "typescript",
+  "expectedVerdicts": [
+    {
+      "threadId": "T1",
+      "verdict": "fixed"
+    }
+  ],
+  "input": {
+    "changeRequest": {
+      "title": "Add timeout to user fetch",
+      "number": 100
+    },
+    "files": [
+      {
+        "path": "src/users.ts",
+        "additions": 3,
+        "deletions": 2,
+        "patch": "@@ -1,8 +1,9 @@\n const BASE = process.env.USERS_API ?? \"http://users.internal\";\n \n export async function fetchUser(id: string) {\n-  const controller = new AbortController();\n-  const response = await fetch(`${BASE}/users/${id}`);\n+  const response = await fetch(`${BASE}/users/${id}`, {\n+    signal: AbortSignal.timeout(5_000),\n+  });\n   if (!response.ok) {\n     throw new Error(`user ${id}: ${response.status}`);\n   }",
+        "fileContent": "const BASE = process.env.USERS_API ?? \"http://users.internal\";\n\nexport async function fetchUser(id: string) {\n  const response = await fetch(`${BASE}/users/${id}`, {\n    signal: AbortSignal.timeout(5_000),\n  });\n  if (!response.ok) {\n    throw new Error(`user ${id}: ${response.status}`);\n  }\n  return response.json();\n}\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10,
+    "scope": "commit_delta",
+    "priorThreads": [
+      {
+        "id": "T1",
+        "needsVerdict": true,
+        "path": "src/users.ts",
+        "line": 5,
+        "state": "open",
+        "title": "fetch has no timeout; a hung upstream blocks the request forever",
+        "fingerprint": "src/users.ts:5:correctness:fetch_has_no_timeout"
+      }
+    ],
+    "priorReviewRoundCount": 1
+  },
+  "expectedFindings": []
+}

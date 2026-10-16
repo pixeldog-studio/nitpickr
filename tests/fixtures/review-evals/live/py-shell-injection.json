@@ -1,0 +1,33 @@
+{
+  "name": "py-shell-injection",
+  "source": "synthetic",
+  "kind": "planted",
+  "stack": "python",
+  "expectedVerdicts": [],
+  "input": {
+    "changeRequest": {
+      "title": "Generate thumbnails for uploads",
+      "number": 100
+    },
+    "files": [
+      {
+        "path": "backend/media/thumbnails.py",
+        "additions": 14,
+        "deletions": 0,
+        "patch": "@@ -0,0 +1,14 @@\n+import subprocess\n+from pathlib import Path\n+\n+THUMB_DIR = Path(\"/var/media/thumbs\")\n+\n+\n+def make_thumbnail(upload_name: str, source: Path) -> Path:\n+    target = THUMB_DIR / f\"{upload_name}.jpg\"\n+    subprocess.run(\n+        f\"convert {source} -resize 256x256 {target}\",\n+        shell=True,\n+        check=True,\n+    )\n+    return target",
+        "fileContent": "import subprocess\nfrom pathlib import Path\n\nTHUMB_DIR = Path(\"/var/media/thumbs\")\n\n\ndef make_thumbnail(upload_name: str, source: Path) -> Path:\n    target = THUMB_DIR / f\"{upload_name}.jpg\"\n    subprocess.run(\n        f\"convert {source} -resize 256x256 {target}\",\n        shell=True,\n        check=True,\n    )\n    return target\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10
+  },
+  "expectedFindings": [
+    {
+      "label": "shell=True with a user-controlled upload name allows command injection",
+      "path": "backend/media/thumbnails.py",
+      "lineStart": 10,
+      "lineEnd": 11
+    }
+  ]
+}

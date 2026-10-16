@@ -1,0 +1,33 @@
+{
+  "name": "sql-supabase-table-without-rls",
+  "source": "synthetic",
+  "kind": "planted",
+  "stack": "sql",
+  "expectedVerdicts": [],
+  "input": {
+    "changeRequest": {
+      "title": "Add plant journal entries table",
+      "number": 100
+    },
+    "files": [
+      {
+        "path": "supabase/migrations/20261001120000_journal_entries.sql",
+        "additions": 11,
+        "deletions": 0,
+        "patch": "@@ -0,0 +1,11 @@\n+create table public.journal_entries (\n+  id uuid primary key default gen_random_uuid(),\n+  user_id uuid not null references auth.users (id) on delete cascade,\n+  plant_id uuid not null references public.plants (id) on delete cascade,\n+  note text not null,\n+  created_at timestamptz not null default now()\n+);\n+\n+create index journal_entries_user_id_idx on public.journal_entries (user_id);\n+\n+grant select, insert, update, delete on public.journal_entries to authenticated;",
+        "fileContent": "create table public.journal_entries (\n  id uuid primary key default gen_random_uuid(),\n  user_id uuid not null references auth.users (id) on delete cascade,\n  plant_id uuid not null references public.plants (id) on delete cascade,\n  note text not null,\n  created_at timestamptz not null default now()\n);\n\ncreate index journal_entries_user_id_idx on public.journal_entries (user_id);\n\ngrant select, insert, update, delete on public.journal_entries to authenticated;\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10
+  },
+  "expectedFindings": [
+    {
+      "label": "table in the exposed public schema without row level security: every user can read and edit everyone's entries",
+      "path": "supabase/migrations/20261001120000_journal_entries.sql",
+      "lineStart": 11,
+      "lineEnd": 11
+    }
+  ]
+}
