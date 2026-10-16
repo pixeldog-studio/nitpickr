@@ -554,6 +554,8 @@ export class ReviewPublisher {
     summary: string;
     mermaid: string;
     findings: PublishedFinding[];
+    /** False when no files were reviewed (all ignored or none matched). */
+    reviewed?: boolean;
   }): string {
     const findingTable =
       input.findings.length === 0
@@ -571,7 +573,11 @@ export class ReviewPublisher {
       buildSummaryMarker(),
       buildReviewRunMarker(input.reviewRunId),
       "",
-      `**nitpickr** · ${summarizeFindingCount(input.findings)}`,
+      `**nitpickr** · ${
+        input.reviewed === false
+          ? "nothing to review here."
+          : summarizeFindingCount(input.findings)
+      }`,
       "",
       input.summary.trim(),
       ...(findingTable === null ? [] : ["", findingTable]),
@@ -773,6 +779,9 @@ export class ReviewPublisher {
           });
 
     const openThreads = input.openPriorThreadCount ?? 0;
+    const postedFingerprints = new Set(
+      comments.map((comment) => comment.fingerprint),
+    );
     const body =
       input.publishMode === "commit_summary"
         ? this.buildCommitSummaryBody({
@@ -802,7 +811,12 @@ export class ReviewPublisher {
               reviewRunId: input.reviewRunId,
               summary: input.result.summary,
               mermaid: input.result.mermaid,
-              findings: input.result.findings,
+              // Only findings that became inline comments: the headline and
+              // table must match what the author actually sees.
+              findings: input.result.findings.filter((finding) =>
+                postedFingerprints.has(fingerprintFinding(finding)),
+              ),
+              reviewed: input.files === undefined || input.files.length > 0,
             });
 
     const secondLook = renderSecondLook(input.result.secondLook ?? []);

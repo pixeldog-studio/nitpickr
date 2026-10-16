@@ -87,7 +87,10 @@ export function parseInlineCommentContext(body: string): {
   return {
     title: titleMatch?.[1]?.trim() ?? "nitpickr finding",
     body: bodyLine?.trim() ?? "This finding needs a closer look.",
-    fixPrompt: fixPromptMatch?.[1]?.trim() ?? null,
+    // The agent prompt may carry a "Failure scenario:" note for coding
+    // agents; why/teach/fix replies only want the instruction.
+    fixPrompt:
+      fixPromptMatch?.[1]?.split(/\n\nFailure scenario:/)[0]?.trim() ?? null,
   };
 }
 
