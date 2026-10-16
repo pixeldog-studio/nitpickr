@@ -41,6 +41,34 @@ describe("gateAndRankFindings", () => {
     ]);
   });
 
+  it("rejects findings that repeat a still-open thread", () => {
+    const finding = (line: number, title: string) => ({
+      path: "src/users.ts",
+      line,
+      findingType: "bug",
+      severity: "high" as const,
+      category: "correctness",
+      title,
+    });
+    const result = gateAndRankFindings({
+      findings: [finding(11, "Missing timeout"), finding(30, "Other bug")],
+      files: [
+        {
+          path: "src/users.ts",
+          patch: "@@ -8,1 +8,30 @@\n+changed",
+        },
+      ],
+      openThreads: [{ path: "src/users.ts", line: 10 }],
+    });
+
+    expect(result.acceptedFindings.map((entry) => entry.title)).toEqual([
+      "Other bug",
+    ]);
+    expect(result.rejectedFindings[0]?.reasons).toEqual([
+      "duplicates_open_thread",
+    ]);
+  });
+
   it("keeps no-hunk patches eligible for later targeting", () => {
     const result = gateAndRankFindings({
       findings: [

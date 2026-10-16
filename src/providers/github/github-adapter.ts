@@ -306,6 +306,8 @@ export type GitHubNormalizedEvent =
       trigger: ReviewTrigger;
       mode: NormalizedReviewMode;
       actorLogin: string;
+      /** Head commit for pull_request events; comment commands have none. */
+      headSha?: string;
     }
   | {
       kind: "interaction_requested";
@@ -567,6 +569,7 @@ export class GitHubAdapter {
         trigger,
         mode: parsed.action === "synchronize" ? "quick" : "full",
         actorLogin: parsed.pull_request.user.login,
+        headSha: parsed.pull_request.head.sha,
       };
     }
 

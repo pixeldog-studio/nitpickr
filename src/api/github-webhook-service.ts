@@ -104,7 +104,11 @@ function buildReviewJobInput(
     tenantId: `github-installation:${event.installationId}`,
     repositoryId: event.repository.repositoryId,
     changeRequestId: `${event.repository.repositoryId}:${event.pullNumber}`,
-    dedupeKey: `${event.repository.repositoryId}:${event.pullNumber}:${event.mode}`,
+    // Automatic reviews are keyed by commit so a push is never swallowed by a
+    // still-running review of an older commit.
+    dedupeKey: `${event.repository.repositoryId}:${event.pullNumber}:${event.mode}${
+      event.headSha === undefined ? "" : `:${event.headSha}`
+    }`,
     priority: event.trigger.type === "manual_command" ? 100 : 50,
     payload: {
       correlationId,
@@ -116,6 +120,7 @@ function buildReviewJobInput(
       pullNumber: event.pullNumber,
       mode: event.mode,
       trigger: event.trigger,
+      ...(event.headSha === undefined ? {} : { headSha: event.headSha }),
     },
   };
 }

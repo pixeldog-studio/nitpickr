@@ -14,10 +14,15 @@ import {
   type EvidenceGateRejectedFinding,
   gateAndRankFindings,
   type ReviewFeedbackSignal,
+  type Severity,
   severityWeight,
 } from "./evidence-gate.js";
 import { fingerprintFinding } from "./finding-fingerprint.js";
-import { type PriorThread, PromptBuilder } from "./prompt-builder.js";
+import {
+  type PriorThread,
+  type PriorThreadVerdict,
+  PromptBuilder,
+} from "./prompt-builder.js";
 import {
   type PromptOptimizationMode,
   PromptPayloadOptimizer,
@@ -459,6 +464,30 @@ function normalizeDiagram(value: unknown): DiagramSpec | null {
   return null;
 }
 
+const priorThreadVerdictValues = [
+  "fixed",
+  "still_applies",
+  "obsolete",
+] as const satisfies readonly PriorThreadVerdict[];
+
+function normalizePriorThreadVerdicts(
+  value: unknown,
+): Array<{ threadId: string; verdict: PriorThreadVerdict }> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((entry) => {
+    if (typeof entry !== "object" || entry === null) {
+      return [];
+    }
+    const candidate = entry as Record<string, unknown>;
+    const threadId = normalizeString(candidate.threadId);
+    const verdict = normalizeString(candidate.verdict)?.toLowerCase();
+    const known = priorThreadVerdictValues.find((value) => value === verdict);
+    return threadId && known ? [{ threadId, verdict: known }] : [];
+  });
+}
+
 const modelResponseSchema = z
   .object({
     summary: z.preprocess((value) => {
@@ -478,12 +507,16 @@ const modelResponseSchema = z
       (value) => normalizeFindings(value),
       z.array(findingSchema),
     ),
+    priorThreadVerdicts: z.unknown().optional(),
   })
   .transform((value) => ({
     summary: value.summary,
     diagram: normalizeDiagram(value.diagram),
     legacyMermaid: normalizeLegacyMermaid(value.mermaid),
     findings: value.findings,
+    priorThreadVerdicts: normalizePriorThreadVerdicts(
+      value.priorThreadVerdicts,
+    ),
   }));
 
 /**
@@ -527,6 +560,12 @@ const reviewResponseWireSchema = z.strictObject({
       body: z.string(),
       fixPrompt: z.string(),
       suggestedChange: z.string().nullable(),
+    }),
+  ),
+  priorThreadVerdicts: z.array(
+    z.strictObject({
+      threadId: z.string(),
+      verdict: z.enum(priorThreadVerdictValues),
     }),
   ),
 });
@@ -579,12 +618,22 @@ export interface ReviewEngineInput {
    * long-iteration PRs. Defaults to 0 when omitted.
    */
   priorReviewRoundCount?: number;
+  /**
+   * Minimum severity to publish (round-aware floor, see severity-floor.ts).
+   * Applied before the comment budget so low findings never take a slot.
+   */
+  severityFloor?: Severity | null;
 }
 
 export interface ReviewEngineResult {
   summary: string;
   mermaid: string;
   findings: ReviewFinding[];
+  /** Verdicts for prior threads that needed one; unknown ids are dropped. */
+  priorThreadVerdicts?: Array<{
+    threadId: string;
+    verdict: PriorThreadVerdict;
+  }>;
 }
 
 export interface ReviewEngineDiagnosticsResult {
@@ -897,15 +946,32 @@ export class ReviewEngine {
       },
     );
 
+    // The comment budget is applied by the callers, after every filter, so
+    // findings that are later rejected never take a slot.
     const mergedFindings = dedupeAndRankFindings(
       responses.flatMap((response) => response.findings),
-    ).slice(0, input.commentBudget);
+    );
+
+    const verdictThreadIds = new Set(
+      (input.priorThreads ?? [])
+        .filter((thread) => thread.needsVerdict)
+        .map((thread) => thread.id),
+    );
+    const priorThreadVerdicts = [
+      ...new Map(
+        responses
+          .flatMap((response) => response.priorThreadVerdicts)
+          .filter((entry) => verdictThreadIds.has(entry.threadId))
+          .map((entry) => [entry.threadId, entry] as const),
+      ).values(),
+    ];
 
     return {
       result: {
         summary: responses.map((response) => response.summary).join("\n\n"),
         mermaid: renderMergedDiagram(responses),
         findings: mergedFindings,
+        priorThreadVerdicts,
       },
       promptUsage: {
         beforeCompaction,
@@ -916,19 +982,37 @@ export class ReviewEngine {
 
   async review(input: ReviewEngineInput): Promise<ReviewEngineResult> {
     const reviewed = await this.#reviewInternal(input);
-    return reviewed.result;
+    return {
+      ...reviewed.result,
+      findings: reviewed.result.findings.slice(0, input.commentBudget),
+    };
   }
 
   async reviewWithDiagnostics(
     input: ReviewEngineInput,
   ): Promise<ReviewEngineDiagnosticsResult> {
     const reviewed = await this.#reviewInternal(input);
+    // Only the primary files are in scope: they are the ones the publisher can
+    // anchor inline comments to. Context files are listed to the model by
+    // name only, so a finding on them has no evidence behind it.
+    const settledThreadIds = new Set(
+      (reviewed.result.priorThreadVerdicts ?? [])
+        .filter((entry) => entry.verdict !== "still_applies")
+        .map((entry) => entry.threadId),
+    );
+    const openThreads = (input.priorThreads ?? [])
+      .filter(
+        (thread) =>
+          thread.state !== "resolved" && !settledThreadIds.has(thread.id),
+      )
+      .map((thread) => ({ path: thread.path, line: thread.line }));
     const gatedFindings = gateAndRankFindings({
       findings: reviewed.result.findings,
       files: input.files,
-      ...(input.contextFiles === undefined
+      ...(openThreads.length === 0 ? {} : { openThreads }),
+      ...(input.severityFloor === undefined
         ? {}
-        : { contextFiles: input.contextFiles }),
+        : { minimumSeverity: input.severityFloor }),
       ...(input.feedbackSignals === undefined
         ? {}
         : { feedbackSignals: input.feedbackSignals }),

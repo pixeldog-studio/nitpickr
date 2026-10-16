@@ -197,6 +197,8 @@ describe("PostgresJobStore", () => {
     expect(canceled).toBe(2);
     expect(client.calls[0]?.query).toContain("type = 'review_requested'");
     expect(client.calls[0]?.query).toContain("status = 'queued'");
+    // Manual commands carry no headSha and must never be superseded.
+    expect(client.calls[0]?.query).toContain("payload->>'headSha' is not null");
   });
 
   it("requeues stale running jobs whose workers are no longer fresh", async () => {

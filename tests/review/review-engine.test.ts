@@ -75,7 +75,7 @@ describe("ReviewEngine", () => {
       expect.objectContaining({
         name: "nitpickr_review",
         schema: expect.objectContaining({
-          required: ["summary", "diagram", "findings"],
+          required: ["summary", "diagram", "findings", "priorThreadVerdicts"],
           additionalProperties: false,
         }),
       }),
@@ -340,6 +340,85 @@ describe("ReviewEngine", () => {
         }),
       ]),
     );
+  });
+
+  it("applies the comment budget after the gate and severity floor", async () => {
+    const lowFinding = (line: number) => ({
+      path: "src/queue/a.ts",
+      line,
+      findingType: "bug",
+      severity: "low",
+      category: "correctness",
+      title: `Low finding ${line}`,
+      body: "Minor issue.",
+      fixPrompt: `In \`src/queue/a.ts\` around line ${line}, tidy this.`,
+    });
+    const model = new FakeReviewModel([
+      {
+        summary: "Summary",
+        findings: [
+          lowFinding(10),
+          lowFinding(11),
+          {
+            path: "src/context/b.ts",
+            line: 3,
+            findingType: "bug",
+            severity: "critical",
+            category: "security",
+            title: "Context-only file",
+            body: "Points at a file outside the primary scope.",
+            fixPrompt: "In `src/context/b.ts` around line 3, fix it.",
+          },
+          {
+            path: "src/queue/a.ts",
+            line: 12,
+            findingType: "bug",
+            severity: "medium",
+            category: "correctness",
+            title: "Real bug",
+            body: "Equal priorities lose insertion order.",
+            fixPrompt: "In `src/queue/a.ts` around line 12, keep order.",
+          },
+        ],
+      },
+    ]);
+
+    const result = await new ReviewEngine(model).reviewWithDiagnostics({
+      changeRequest: { title: "Queue", number: 7 },
+      scope: "commit_delta",
+      files: [
+        {
+          path: "src/queue/a.ts",
+          additions: 3,
+          deletions: 0,
+          patch: "@@ -9,1 +10,3 @@\n+a\n+b\n+c",
+        },
+      ],
+      contextFiles: [
+        {
+          path: "src/context/b.ts",
+          additions: 1,
+          deletions: 0,
+          patch: "@@ -1,1 +3,1 @@\n+x",
+        },
+      ],
+      instructionText: "",
+      memory: [],
+      commentBudget: 1,
+      severityFloor: "medium",
+    });
+
+    expect(result.result.findings.map((finding) => finding.title)).toEqual([
+      "Real bug",
+    ]);
+    const reasons = Object.fromEntries(
+      result.rejectedFindings.map((rejected) => [
+        rejected.finding.title,
+        rejected.reasons,
+      ]),
+    );
+    expect(reasons["Context-only file"]).toEqual(["path_not_in_scope"]);
+    expect(reasons["Low finding 10"]).toEqual(["below_severity_floor"]);
   });
 
   it("emits prompt usage diagnostics and compacts balanced commit-delta payloads", async () => {

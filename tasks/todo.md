@@ -1,3 +1,35 @@
+# High-signal reviewer (goal set 2026-10-16)
+
+Design: `docs/superpowers/specs/2026-10-16-high-signal-reviewer-design.md`.
+Baseline commit: `e7aecec`. One PR per milestone; never merge; nitpickr reviews each PR.
+
+## Milestone 1 — bugs + end state
+- [x] Budget applied after gate + severity floor (engine owns the floor)
+- [x] Evidence gate scoped to files the publisher can anchor to
+- [x] Job payload carries headSha; supersession cancels only automatic jobs for older commits
+- [x] Enqueue dedupe does not swallow a newer commit while an older review runs
+- [x] Explicit prior-thread verdicts; resolve only fixed/obsolete
+- [x] "No further comments" end state
+- [x] Gate findings that repeat a still-open thread (seen live: model re-raised an open thread)
+- [ ] lint, typecheck, tests; PR opened; nitpickr comments triaged + scorecard
+
+## Milestone 2 — eval suite + baseline
+- [ ] Pipeline-level live eval (gate, floor, budget, multi-round)
+- [ ] >= 30 cases from active repos (Swift, TS/Node/Astro, Python, Postgres), clean + multi-round + injection
+- [ ] Metrics: precision (medium+), recall, nit count, median latency
+- [ ] Baseline on `e7aecec`, comparison on branch
+
+## Milestone 3 — verifier + lenses + lint filter + untrusted content
+## Milestone 4 — conversation
+## Milestone 5 — learning
+## Milestone 6 — voice
+
+## Dogfood scorecard
+
+| PR | comments | valid | nits | wrong | missed | notes |
+|---|---|---|---|---|---|---|
+| #13 (pre-work) | 15 | ? | most | 1 contradiction pair | ? | baseline sample |
+
 # Website Metadata + SEO Refresh
 
 ## Plan

@@ -308,7 +308,8 @@ export class PostgresJobStore implements JobStore {
             and status = 'queued'
             and repository_id = $1
             and change_request_id = $2
-            and coalesce(payload->>'headSha', '') <> $3
+            and payload->>'headSha' is not null
+            and payload->>'headSha' <> $3
           returning id
         )
         select count(*)::int as canceled_count

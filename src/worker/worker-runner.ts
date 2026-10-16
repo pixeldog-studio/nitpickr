@@ -19,6 +19,7 @@ import { fingerprintFinding } from "../review/finding-fingerprint.js";
 import type {
   PriorThread,
   PriorThreadState,
+  PriorThreadVerdict,
 } from "../review/prompt-builder.js";
 import type { PromptOptimizationMode } from "../review/prompt-payload-optimizer.js";
 import type {
@@ -257,48 +258,6 @@ async function enrichPublishedCommentsWithProviderMetadata(
   });
 }
 
-function isThreadStale(input: {
-  thread: {
-    path: string;
-    fingerprint: string;
-    isResolved: boolean;
-  };
-  comparedPaths: Set<string>;
-  currentFingerprints: Set<string>;
-}): boolean {
-  const { thread, comparedPaths, currentFingerprints } = input;
-  if (thread.isResolved) {
-    return false;
-  }
-  if (!comparedPaths.has(thread.path)) {
-    return false;
-  }
-  return !currentFingerprints.has(thread.fingerprint);
-}
-
-function findStaleThreadIds(input: {
-  comparedPaths: string[];
-  currentFingerprints: Set<string>;
-  threads: Array<{
-    threadId: string;
-    path: string;
-    fingerprint: string;
-    isResolved: boolean;
-  }>;
-}): string[] {
-  const comparedPathSet = new Set(input.comparedPaths);
-
-  return input.threads
-    .filter((thread) =>
-      isThreadStale({
-        thread,
-        comparedPaths: comparedPathSet,
-        currentFingerprints: input.currentFingerprints,
-      }),
-    )
-    .map((thread) => thread.threadId);
-}
-
 const PRIOR_THREAD_TITLE_MAX_LENGTH = 120;
 const PRIOR_THREAD_REPLY_MAX_LENGTH = 240;
 
@@ -431,7 +390,11 @@ function extractPatchLineRanges(patch: string | null): Set<number> {
   return lines;
 }
 
+/** Lines around a thread that, when changed, ask the model for a verdict. */
+const PRIOR_THREAD_VERDICT_LINE_WINDOW = 3;
+
 function buildPriorThreads(input: {
+  scope: ReviewRun["scope"];
   existingThreads: Array<{
     threadId: string;
     providerCommentId: string;
@@ -482,7 +445,19 @@ function buildPriorThreads(input: {
     }
   }
 
-  return input.existingThreads.map((thread) => {
+  return input.existingThreads.map((thread, index) => {
+    const changedLines = changedLinesByPath.get(thread.path);
+    let changedNearThread = false;
+    for (
+      let line = thread.line - PRIOR_THREAD_VERDICT_LINE_WINDOW;
+      line <= thread.line + PRIOR_THREAD_VERDICT_LINE_WINDOW;
+      line += 1
+    ) {
+      if (changedLines?.has(line)) {
+        changedNearThread = true;
+        break;
+      }
+    }
     let state: PriorThreadState;
     if (thread.isResolved) {
       state = "resolved";
@@ -499,6 +474,13 @@ function buildPriorThreads(input: {
 
     const reply = userRepliesByKey.get(`${thread.path}:${thread.line}`);
     const priorThread: PriorThread = {
+      id: `T${index + 1}`,
+      // Only a push (commit delta) can show whether a thread was fixed; a
+      // full-PR patch compares against the base, not the earlier review.
+      needsVerdict:
+        input.scope === "commit_delta" &&
+        !thread.isResolved &&
+        changedNearThread,
       path: thread.path,
       line: thread.line,
       state,
@@ -509,6 +491,34 @@ function buildPriorThreads(input: {
       priorThread.userReply = summarizeThreadReply(reply.body);
     }
     return priorThread;
+  });
+}
+
+/**
+ * Threads to resolve after a review round. A thread is resolved only when the
+ * model returned an explicit `fixed` or `obsolete` verdict for a thread that
+ * needed one; a finding simply not being raised again is not evidence of a
+ * fix. `priorThreads` must be built from `existingThreads` (same order).
+ */
+export function selectThreadsToResolve<TThread>(input: {
+  priorThreads: PriorThread[];
+  existingThreads: TThread[];
+  verdicts: Array<{ threadId: string; verdict: PriorThreadVerdict }>;
+}): Array<{ thread: TThread; verdict: "fixed" | "obsolete" }> {
+  const verdictByThreadId = new Map(
+    input.verdicts.map((entry) => [entry.threadId, entry.verdict]),
+  );
+  return input.priorThreads.flatMap((priorThread, index) => {
+    const verdict = verdictByThreadId.get(priorThread.id);
+    const thread = input.existingThreads[index];
+    if (
+      !priorThread.needsVerdict ||
+      thread === undefined ||
+      (verdict !== "fixed" && verdict !== "obsolete")
+    ) {
+      return [];
+    }
+    return [{ thread, verdict }];
   });
 }
 
@@ -556,6 +566,8 @@ function parseReviewJobPayload(payload: QueueJob["payload"]): {
   pullNumber: number;
   mode: ReviewRun["mode"];
   trigger: ReturnType<typeof parseReviewTrigger>;
+  /** Commit the job was queued for; null for comment commands. */
+  headSha: string | null;
 } {
   const installationId = payload.installationId;
   const repository = payload.repository as Record<string, unknown> | undefined;
@@ -604,6 +616,10 @@ function parseReviewJobPayload(payload: QueueJob["payload"]): {
     pullNumber,
     mode,
     trigger: parseReviewTrigger(payload.trigger),
+    headSha:
+      typeof payload.headSha === "string" && payload.headSha.length > 0
+        ? payload.headSha
+        : null,
   };
 }
 
@@ -1106,6 +1122,19 @@ export class WorkerRunner {
         throw classifyReviewError("github", error);
       }
       changeRequestContext = context;
+      if (
+        payload.headSha !== null &&
+        payload.headSha !== context.changeRequest.headSha
+      ) {
+        // A newer push queued its own job; reviewing the new head here would
+        // duplicate that review.
+        logger.info("Skipping review job for an outdated commit.", {
+          jobId: job.id,
+          queuedHeadSha: payload.headSha,
+          currentHeadSha: context.changeRequest.headSha,
+        });
+        return;
+      }
       const reviewScope = determineReviewScope(payload.trigger);
       const latestCompletedReview =
         reviewScope === "commit_delta" &&
@@ -1306,6 +1335,7 @@ export class WorkerRunner {
         : [];
 
       const priorThreads = buildPriorThreads({
+        scope: reviewScope,
         existingThreads: existingNitpickrThreads,
         reviewedFiles: reviewPlan.files.map((file) => ({
           path: file.path,
@@ -1386,6 +1416,7 @@ export class WorkerRunner {
                   ),
                   commentBudget: reviewPlan.commentBudget,
                   priorReviewRoundCount,
+                  severityFloor: severityFloorForRound(priorReviewRoundCount),
                   ...(feedbackSignals.length === 0 ? {} : { feedbackSignals }),
                   ...(priorThreads.length === 0 ? {} : { priorThreads }),
                   ...(isAutomaticTrigger(payload.trigger)
@@ -1529,52 +1560,59 @@ export class WorkerRunner {
           },
         );
       }
-      if (reviewScope === "commit_delta") {
-        const staleThreadIds = findStaleThreadIds({
-          comparedPaths: reviewPlan.files.map((file) => file.path),
-          currentFingerprints: new Set(
-            draftPublishedComments.map((comment) => comment.fingerprint),
-          ),
-          threads: existingNitpickrThreads,
-        });
-        for (const threadId of staleThreadIds) {
-          try {
-            if (this.#githubAdapter.resolveReviewThread) {
-              await this.#githubAdapter.resolveReviewThread({
-                installationId: payload.installationId,
-                threadId,
-              });
-              resolvedThreadCount += 1;
-            }
-          } catch (error) {
-            logger.warn("Failed to resolve stale nitpickr review thread.", {
-              jobId: job.id,
-              reviewRunId: startedReviewRunId,
-              threadId,
-              error: toErrorMessage(error),
+      const threadsToResolve = selectThreadsToResolve({
+        priorThreads,
+        existingThreads: existingNitpickrThreads,
+        verdicts: rawResult.priorThreadVerdicts ?? [],
+      });
+      const resolvedThreads: typeof threadsToResolve = [];
+      for (const entry of threadsToResolve) {
+        try {
+          if (this.#githubAdapter.resolveReviewThread) {
+            await this.#githubAdapter.resolveReviewThread({
+              installationId: payload.installationId,
+              threadId: entry.thread.threadId,
             });
+            resolvedThreads.push(entry);
           }
-        }
-        if (resolvedThreadCount > 0) {
-          await this.#reviewLifecycle.markPublishedCommentsResolved?.(
-            staleThreadIds,
-          );
-          if (this.#feedbackService) {
-            await this.#feedbackService.recordOutcome({
-              tenantId: job.tenantId,
-              repositoryId: job.repositoryId,
-              events: existingNitpickrThreads
-                .filter((thread) => staleThreadIds.includes(thread.threadId))
-                .map((thread) => ({
-                  fingerprint: thread.fingerprint,
-                  path: thread.path,
-                  category: categoryFromFingerprint(thread.fingerprint),
-                  kind: "fixed_after_comment" as const,
-                })),
-            });
-          }
+        } catch (error) {
+          logger.warn("Failed to resolve nitpickr review thread.", {
+            jobId: job.id,
+            reviewRunId: startedReviewRunId,
+            threadId: entry.thread.threadId,
+            verdict: entry.verdict,
+            error: toErrorMessage(error),
+          });
         }
       }
+      resolvedThreadCount = resolvedThreads.length;
+      if (resolvedThreadCount > 0) {
+        await this.#reviewLifecycle.markPublishedCommentsResolved?.(
+          resolvedThreads.map((entry) => entry.thread.threadId),
+        );
+        const fixedEvents = resolvedThreads
+          .filter((entry) => entry.verdict === "fixed")
+          .map((entry) => ({
+            fingerprint: entry.thread.fingerprint,
+            path: entry.thread.path,
+            category: categoryFromFingerprint(entry.thread.fingerprint),
+            kind: "fixed_after_comment" as const,
+          }));
+        if (this.#feedbackService && fixedEvents.length > 0) {
+          await this.#feedbackService.recordOutcome({
+            tenantId: job.tenantId,
+            repositoryId: job.repositoryId,
+            events: fixedEvents,
+          });
+        }
+      }
+      const resolvedThreadIds = new Set(
+        resolvedThreads.map((entry) => entry.thread.threadId),
+      );
+      const openPriorThreadCount = existingNitpickrThreads.filter(
+        (thread) =>
+          !thread.isResolved && !resolvedThreadIds.has(thread.threadId),
+      ).length;
       const publishedReview = await withTiming(
         logger,
         "publish_review",
@@ -1593,6 +1631,7 @@ export class WorkerRunner {
               commitSummaryCounts: {
                 resolvedThreads: resolvedThreadCount,
               },
+              openPriorThreadCount,
               result: publishableResult as ReviewEngineResult,
               files: reviewPlan.files.map((file) => ({
                 path: file.path,
@@ -1632,7 +1671,10 @@ export class WorkerRunner {
             ? "nitpickr skipped inline review for this change."
             : reviewPlan.summaryOnly
               ? "nitpickr published a summary-only review."
-              : "nitpickr review completed successfully.";
+              : publishableResult.findings.length === 0 &&
+                  openPriorThreadCount === 0
+                ? "No further comments."
+                : "nitpickr review completed successfully.";
         if (reviewPlan.files.length === 0) {
           const published = await this.#publishReviewStatus(
             "skipped",

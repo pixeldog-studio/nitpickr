@@ -250,6 +250,109 @@ describe("WorkerRunner", () => {
     );
   });
 
+  it("skips review jobs queued for a commit that is no longer the head", async () => {
+    const queue = new FakeQueueScheduler();
+    const logger = new FakeLogger();
+    const lifecycle = new FakeReviewLifecycleService();
+    queue.nextJobs = [
+      {
+        id: "job_outdated",
+        type: "review_requested",
+        tenantId: "github-installation:123456",
+        repositoryId: "github:99",
+        changeRequestId: "github:99:42",
+        dedupeKey: `github:99:42:quick:${"a".repeat(40)}`,
+        priority: 50,
+        status: "running",
+        attempts: 0,
+        maxAttempts: 3,
+        payload: {
+          installationId: "123456",
+          repository: { owner: "rubenspessoa", name: "nitpickr" },
+          pullNumber: 42,
+          mode: "quick",
+          trigger: { type: "pr_synchronized", actorLogin: "ruben" },
+          headSha: "a".repeat(40),
+        },
+        createdAt: new Date("2026-03-09T10:00:00.000Z"),
+        scheduledAt: new Date("2026-03-09T10:00:00.000Z"),
+        startedAt: new Date("2026-03-09T10:00:01.000Z"),
+        completedAt: null,
+        workerId: "worker_1",
+        lastError: null,
+      },
+    ];
+
+    const runner = new WorkerRunner({
+      logger,
+      queueScheduler: queue,
+      githubAdapter: {
+        async fetchChangeRequestContext() {
+          return {
+            tenantId: "github-installation:123456",
+            installationId: "123456",
+            repositoryId: "github:99",
+            repository: { owner: "rubenspessoa", name: "nitpickr" },
+            changeRequest: {
+              id: "github:99:42",
+              tenantId: "github-installation:123456",
+              installationId: "123456",
+              repositoryId: "github:99",
+              provider: "github" as const,
+              number: 42,
+              title: "Improve queue fairness",
+              baseSha: "c".repeat(40),
+              headSha: "b".repeat(40),
+              status: "open" as const,
+              authorLogin: "ruben",
+            },
+            files: [],
+            comments: [],
+          };
+        },
+      },
+      instructionBundleLoader: {
+        async loadForReview() {
+          throw new Error("should not load");
+        },
+      },
+      memoryService: {
+        async getRelevantMemories() {
+          return [];
+        },
+        async ingestDiscussion() {
+          throw new Error("should not ingest");
+        },
+      },
+      reviewPlanner: new FakeReviewPlanner(),
+      reviewLifecycle: lifecycle,
+      reviewEngine: {
+        async review() {
+          throw new Error("should not review");
+        },
+      },
+      publisher: {
+        buildInlineComments() {
+          return [];
+        },
+        async publish() {
+          throw new Error("should not publish");
+        },
+      },
+    });
+
+    await runner.runOnce({ workerId: "worker_1", perTenantCap: 1 });
+
+    expect(queue.completed).toEqual(["job_outdated"]);
+    expect(queue.failed).toEqual([]);
+    expect(lifecycle.started).toEqual([]);
+    expect(logger.entries).toContainEqual(
+      expect.objectContaining({
+        message: "Skipping review job for an outdated commit.",
+      }),
+    );
+  });
+
   it("processes review jobs end to end", async () => {
     const queue = new FakeQueueScheduler();
     const lifecycle = new FakeReviewLifecycleService();
@@ -458,7 +561,7 @@ describe("WorkerRunner", () => {
         },
         sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         reviewRunId: "review_run_1",
-        description: "nitpickr review completed successfully.",
+        description: "No further comments.",
         summary: "Queue fairness improved.",
       },
     ]);
@@ -680,6 +783,9 @@ describe("WorkerRunner", () => {
                 fixPrompt:
                   "Preserve insertion order for equal priorities in src/queue/queue-scheduler.ts around line 18.",
               },
+            ],
+            priorThreadVerdicts: [
+              { threadId: "T1", verdict: "fixed" as const },
             ],
           };
         },
