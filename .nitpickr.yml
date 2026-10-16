@@ -2,4 +2,7 @@ review:
   strictness: balanced
   maxComments: 20
   focusAreas: []
-  ignorePaths: []
+  # Eval fixtures are captured PR snapshots (data, not code under review).
+  ignorePaths:
+    - "tests/fixtures/**"
+    - "website/**"
