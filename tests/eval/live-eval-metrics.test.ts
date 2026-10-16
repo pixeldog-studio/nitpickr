@@ -162,3 +162,33 @@ describe("transport retries", () => {
     expect(report.cases[0]?.error).toBeNull();
   });
 });
+
+describe("rescoreReport", () => {
+  it("re-matches saved findings against updated labels", async () => {
+    const { rescoreReport } = await import(
+      "../../src/eval/live-review-evaluator.js"
+    );
+    const saved = report({
+      name: "case-a",
+      findings: [
+        { ...finding("high"), path: "a.ts", line: 10, title: "Path traversal" },
+      ],
+      unexpected: ["a.ts:10 [high/correctness] Path traversal"],
+      publishedMediumPlus: 1,
+    });
+    const rescored = rescoreReport({ cases: [saved] }, [
+      {
+        name: "case-a",
+        kind: "planted",
+        stack: "python",
+        expectedVerdicts: [],
+        input: {} as never,
+        expectedFindings: [
+          { label: "path traversal", path: "a.ts", lineStart: 9, lineEnd: 11 },
+        ],
+      },
+    ]);
+    expect(rescored.totals.precisionMediumPlus).toBe(1);
+    expect(rescored.cases[0]?.unexpected).toEqual([]);
+  });
+});

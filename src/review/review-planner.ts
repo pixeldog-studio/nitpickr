@@ -44,6 +44,22 @@ function globToRegex(pattern: string): RegExp {
   return new RegExp(`^${escaped}$`);
 }
 
+/**
+ * Lockfiles, snapshots and minified bundles are generated: reviewing them
+ * costs model time and produces findings nobody can act on.
+ */
+const GENERATED_FILE = new RegExp(
+  [
+    "(^|/)(pnpm-lock\\.yaml|package-lock\\.json|yarn\\.lock|bun\\.lockb|Package\\.resolved|Podfile\\.lock|Gemfile\\.lock|Cargo\\.lock|poetry\\.lock|uv\\.lock|composer\\.lock)$",
+    "\\.min\\.(js|css)$",
+    "\\.snap$",
+  ].join("|"),
+);
+
+export function isGeneratedFile(path: string): boolean {
+  return GENERATED_FILE.test(path);
+}
+
 function matchesAnyPattern(path: string, patterns: string[]): boolean {
   return patterns.some((pattern) => globToRegex(pattern).test(path));
 }
@@ -57,6 +73,7 @@ export class ReviewPlanner {
     const filteredFiles = input.files
       .filter(
         (file) =>
+          !isGeneratedFile(file.path) &&
           !matchesAnyPattern(file.path, input.config.review.ignorePaths),
       )
       .slice(0, input.config.review.maxFiles);

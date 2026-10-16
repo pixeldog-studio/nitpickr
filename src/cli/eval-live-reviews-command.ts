@@ -60,7 +60,10 @@ function formatCase(report: LiveCaseReport): string {
   ].join(" | ");
 }
 
-function formatTotals(label: string, totals: LiveEvaluationTotals): string {
+export function formatTotals(
+  label: string,
+  totals: LiveEvaluationTotals,
+): string {
   return [
     `${label}: cases ${totals.cases}`,
     `precision(medium+) ${pct(totals.precisionMediumPlus)}`,

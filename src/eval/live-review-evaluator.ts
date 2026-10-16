@@ -480,6 +480,50 @@ export class LiveReviewEvaluator {
   }
 }
 
+/**
+ * Re-score a saved report against the current fixture labels without
+ * calling the model: used after adjudicating "unexpected" findings so the
+ * baseline and a branch are compared with the same labels.
+ */
+export function rescoreReport(
+  report: Pick<LiveEvaluationReport, "cases">,
+  fixtures: LiveEvaluationFixture[],
+): LiveEvaluationReport {
+  const byName = new Map(fixtures.map((fixture) => [fixture.name, fixture]));
+  const cases = report.cases.flatMap((entry) => {
+    const fixture = byName.get(entry.name);
+    if (!fixture) {
+      return [];
+    }
+    const findings = entry.findings as ReviewFinding[];
+    const { matched, missed, unexpected } = matchFindings(
+      findings,
+      fixture.expectedFindings,
+    );
+    const rescored: LiveCaseReport = {
+      ...entry,
+      kind: fixture.kind,
+      stack: fixture.stack,
+      matched: matched.map((item) => ({
+        expected: describeExpected(item.expected),
+        finding: describeFinding(item.finding),
+      })),
+      missed:
+        entry.error === null ? missed.map(describeExpected) : entry.missed,
+      unexpected: unexpected.map(describeFinding),
+      matchedMediumPlus: matched.filter((item) => isMediumPlus(item.finding))
+        .length,
+      precision: findings.length === 0 ? 1 : matched.length / findings.length,
+      recall:
+        fixture.expectedFindings.length === 0
+          ? 1
+          : matched.length / fixture.expectedFindings.length,
+    };
+    return [rescored];
+  });
+  return { cases, totals: summarize(cases) };
+}
+
 function median(values: number[]): number {
   if (values.length === 0) {
     return 0;
