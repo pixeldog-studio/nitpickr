@@ -204,13 +204,12 @@ describe("ReviewPublisher", () => {
 
     expect(body).toContain("Queue fairness improved.");
     expect(body).toContain("<!-- nitpickr:review-run:review_run_1 -->");
-    expect(body).toContain("# nitpickr review");
-    expect(body).toContain("**Summary:**");
-    expect(body).not.toContain("## 📌 Highlights");
-    expect(body).toContain("## Findings");
-    expect(body).toContain("| Signal | Location | Finding |");
-    expect(body).toContain("⚠️ 🧩");
-    expect(body).toContain("🧭 Change flow");
+    expect(body).toContain("**nitpickr** · 1 thing to fix before merging.");
+    expect(body).not.toContain("# nitpickr review");
+    expect(body).toContain("| | Where | Finding |");
+    expect(body).toContain("| 🟠 | `src/queue/queue-scheduler.ts:18` |");
+    expect(body).toContain("<summary>Change flow</summary>");
+    expect(body).toContain("<summary>Talk to nitpickr</summary>");
     expect(body).toContain("```mermaid");
     expect(body).toContain("Stable ordering breaks");
   });
@@ -234,13 +233,15 @@ describe("ReviewPublisher", () => {
       },
     ]);
 
-    expect(comments[0]?.body).toContain("⚠️ 🧩 **Stable ordering breaks**");
-    expect(comments[0]?.body).toContain(
-      "**Where:** `src/queue/queue-scheduler.ts:18`",
-    );
+    expect(
+      comments[0]?.body.startsWith(
+        "**Stable ordering breaks**\n🟠 High · correctness",
+      ),
+    ).toBe(true);
+    expect(comments[0]?.body).not.toContain("**Where:**");
     expect(comments[0]?.body).toContain("```suggestion");
     expect(comments[0]?.body).toContain("left.sequence - right.sequence");
-    expect(comments[0]?.body).toContain("🤖 AI prompt");
+    expect(comments[0]?.body).toContain("Prompt for your coding agent");
     expect(comments[0]?.body).toContain("preserve insertion order");
     expect(comments[0]?.body).not.toContain("[high][correctness]");
     expect(comments[0]?.side).toBe("RIGHT");
@@ -861,9 +862,9 @@ describe("ReviewPublisher", () => {
     expect(client.calls[0]?.body).toContain(
       "<!-- nitpickr:review-run:review_run_2 -->",
     );
-    expect(client.calls[0]?.body).toContain("nitpickr commit review");
+    expect(client.calls[0]?.body).toContain("**nitpickr** · `");
     expect(client.calls[0]?.body).toContain("`bbbbbbb`");
-    expect(client.calls[0]?.body).toContain("New findings: 1");
+    expect(client.calls[0]?.body).toContain("1 new finding in this push.");
     expect(client.calls[0]?.comments).toHaveLength(1);
   });
 
@@ -914,7 +915,7 @@ describe("ReviewPublisher", () => {
     });
 
     expect(client.calls[0]?.comments).toHaveLength(0);
-    expect(client.calls[0]?.body).not.toContain("New findings: 1");
+    expect(client.calls[0]?.body).not.toContain("1 new finding in this push.");
     expect(client.calls[0]?.body).toContain("**No further comments.**");
   });
 
@@ -957,7 +958,9 @@ describe("ReviewPublisher", () => {
     expect(client.calls[0]?.comments).toHaveLength(0);
     expect(client.calls[0]?.body).toContain("**No further comments.**");
     expect(client.calls[0]?.body).toContain("over to a human reviewer");
-    expect(client.calls[0]?.body).toContain("Resolved threads: 2");
+    expect(client.calls[0]?.body).toContain(
+      "Resolved 2 threads this push fixed.",
+    );
   });
 
   it("rejects publish calls with no repository owner", async () => {

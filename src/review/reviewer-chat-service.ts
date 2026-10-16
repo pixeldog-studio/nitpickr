@@ -72,16 +72,16 @@ export function parseInlineCommentContext(body: string): {
   const lines = body.split("\n");
   const titleMatch = /\*\*(.+?)\*\*/.exec(lines[0] ?? "");
   const whereIndex = lines.findIndex((line) => line.startsWith("**Where:**"));
-  const bodyLine = lines
-    .slice(whereIndex >= 0 ? whereIndex + 1 : 1)
-    .find(
-      (line) =>
-        line.trim().length > 0 &&
-        !line.startsWith("```") &&
-        !line.startsWith("<!--") &&
-        !line.startsWith("<details>") &&
-        !line.startsWith("<summary>"),
-    );
+  const bodyLine = lines.slice(whereIndex >= 0 ? whereIndex + 1 : 1).find(
+    (line) =>
+      line.trim().length > 0 &&
+      // The severity label line under the title (current format).
+      !/^(⚪|🟡|🟠|🔴) /.test(line) &&
+      !line.startsWith("```") &&
+      !line.startsWith("<!--") &&
+      !line.startsWith("<details>") &&
+      !line.startsWith("<summary>"),
+  );
   const fixPromptMatch = /```text\n([\s\S]*?)\n```/.exec(body);
 
   return {

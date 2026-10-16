@@ -27,6 +27,7 @@ export interface PublishedFinding {
   body: string;
   fixPrompt: string;
   suggestedChange?: string | undefined;
+  failureScenario?: string | undefined;
 }
 
 export interface PublishReviewClient {
@@ -87,26 +88,20 @@ export interface PublishedInlineComment {
   resolvedAt?: string | null;
 }
 
-const severityEmoji: Record<PublishedFinding["severity"], string> = {
-  low: "🔹",
-  medium: "🟠",
-  high: "⚠️",
-  critical: "🚨",
+const severityLabel: Record<PublishedFinding["severity"], string> = {
+  low: "⚪ Low",
+  medium: "🟡 Medium",
+  high: "🟠 High",
+  critical: "🔴 Critical",
 };
 
-const categoryEmoji: Record<PublishedFinding["category"], string> = {
-  correctness: "🧩",
-  performance: "⚡",
-  security: "🔒",
-  maintainability: "🛠️",
-  testing: "🧪",
-  style: "🎨",
+const severityDot: Record<PublishedFinding["severity"], string> = {
+  low: "⚪",
+  medium: "🟡",
+  high: "🟠",
+  critical: "🔴",
 };
 
-/**
- * Findings the verifier could not confirm: still worth knowing about, but
- * not worth interrupting someone with an inline comment.
- */
 /**
  * One line of model-written prose that is safe to drop into the summary:
  * the model echoes PR content, so it must not be able to close the
@@ -131,6 +126,10 @@ export function neutralizeProse(text: string, maxLength = 400): string {
     .join("");
 }
 
+/**
+ * Findings the verifier could not confirm: still worth knowing about, but
+ * not worth interrupting someone with an inline comment.
+ */
 export function renderSecondLook(findings: PublishedFinding[]): string | null {
   if (findings.length === 0) {
     return null;
@@ -148,12 +147,15 @@ export function renderSecondLook(findings: PublishedFinding[]): string | null {
   ].join("\n");
 }
 
-function escapeMarkdownTableCell(value: string): string {
-  return neutralizeProse(value).replace(/\|/g, "\\|");
+/** One scannable line under the title: severity and what kind of problem. */
+export function renderFindingLabel(
+  finding: Pick<PublishedFinding, "severity" | "category">,
+): string {
+  return `${severityLabel[finding.severity]} · ${finding.category}`;
 }
 
-function renderSignal(finding: PublishedFinding): string {
-  return `${severityEmoji[finding.severity]} ${categoryEmoji[finding.category]}`;
+function escapeMarkdownTableCell(value: string): string {
+  return neutralizeProse(value).replace(/\|/g, "\\|");
 }
 
 function renderGitHubSuggestion(suggestedChange: string | undefined): string[] {
@@ -164,16 +166,20 @@ function renderGitHubSuggestion(suggestedChange: string | undefined): string[] {
   return ["```suggestion", suggestedChange, "```", ""];
 }
 
-function summarizeFindingCount(count: number): string {
-  if (count === 0) {
-    return "No actionable inline findings.";
+/** The headline after "nitpickr ·" in the first review. */
+export function summarizeFindingCount(
+  findings: Array<Pick<PublishedFinding, "severity">>,
+): string {
+  if (findings.length === 0) {
+    return "nothing worth flagging in this PR.";
   }
-
-  if (count === 1) {
-    return "Posted 1 inline finding.";
-  }
-
-  return `Posted ${count} inline findings.`;
+  const blocking = findings.some(
+    (finding) => finding.severity === "high" || finding.severity === "critical",
+  );
+  const noun = findings.length === 1 ? "thing" : "things";
+  return blocking
+    ? `${findings.length} ${noun} to fix before merging.`
+    : `${findings.length} ${noun} worth a look.`;
 }
 
 function buildReviewRunMarker(reviewRunId: string): string {
@@ -551,13 +557,13 @@ export class ReviewPublisher {
   }): string {
     const findingTable =
       input.findings.length === 0
-        ? "- ✅ No actionable inline findings."
+        ? null
         : [
-            "| Signal | Location | Finding |",
+            "| | Where | Finding |",
             "| --- | --- | --- |",
             ...input.findings.map(
               (finding) =>
-                `| ${renderSignal(finding)} | \`${finding.path}:${finding.line}\` | **${escapeMarkdownTableCell(finding.title)}**<br />${escapeMarkdownTableCell(finding.body)} |`,
+                `| ${severityDot[finding.severity]} | \`${finding.path}:${finding.line}\` | ${escapeMarkdownTableCell(finding.title)} |`,
             ),
           ].join("\n");
 
@@ -565,17 +571,13 @@ export class ReviewPublisher {
       buildSummaryMarker(),
       buildReviewRunMarker(input.reviewRunId),
       "",
-      "# nitpickr review ✨",
+      `**nitpickr** · ${summarizeFindingCount(input.findings)}`,
       "",
-      `> ${input.summary.trim()}`,
-      "",
-      `**Summary:** ${summarizeFindingCount(input.findings.length)}`,
-      "",
-      "## Findings",
-      findingTable,
+      input.summary.trim(),
+      ...(findingTable === null ? [] : ["", findingTable]),
       "",
       "<details>",
-      "<summary>🧭 Change flow</summary>",
+      "<summary>Change flow</summary>",
       "",
       "```mermaid",
       input.mermaid.trim(),
@@ -584,7 +586,7 @@ export class ReviewPublisher {
       "</details>",
       "",
       "<details>",
-      "<summary>💬 Talk to nitpickr</summary>",
+      "<summary>Talk to nitpickr</summary>",
       "",
       renderCommandTips(this.#botLogin),
       "",
@@ -610,23 +612,26 @@ export class ReviewPublisher {
     };
   }): string {
     const commitLabel = shortSha(input.reviewedCommitSha);
+    const headline =
+      input.counts.newFindings > 0
+        ? `${input.counts.newFindings} new ${
+            input.counts.newFindings === 1 ? "finding" : "findings"
+          } in this push.`
+        : buildEndStateLine(
+            input.counts.openThreads,
+            input.counts.secondLook ?? 0,
+          );
 
     return [
       buildReviewRunMarker(input.reviewRunId),
       "",
-      "## nitpickr commit review",
+      `**nitpickr**${commitLabel ? ` · \`${commitLabel}\`` : ""} · ${headline}`,
       "",
-      commitLabel ? `**Commit:** \`${commitLabel}\`` : null,
-      `> ${input.summary.trim()}`,
-      "",
-      input.counts.newFindings > 0
-        ? `New findings: ${input.counts.newFindings}`
-        : buildEndStateLine(
-            input.counts.openThreads,
-            input.counts.secondLook ?? 0,
-          ),
+      input.summary.trim(),
       input.counts.resolvedThreads > 0
-        ? `Resolved threads: ${input.counts.resolvedThreads}`
+        ? `\nResolved ${input.counts.resolvedThreads} ${
+            input.counts.resolvedThreads === 1 ? "thread" : "threads"
+          } this push fixed.`
         : null,
     ]
       .filter((line): line is string => line !== null)
@@ -676,18 +681,20 @@ export class ReviewPublisher {
           side: "RIGHT",
           fingerprint: fingerprintFinding(finding),
           body: [
-            `${renderSignal(finding)} **${finding.title}**`,
-            `**Where:** \`${finding.path}:${line}\``,
+            `**${finding.title}**`,
+            renderFindingLabel(finding),
             "",
             `${finding.body}`,
             "",
             ...renderGitHubSuggestion(finding.suggestedChange),
             `<!-- nitpickr:fingerprint:${fingerprintFinding(finding)} -->`,
             "<details>",
-            "<summary>🤖 AI prompt</summary>",
+            "<summary>Prompt for your coding agent</summary>",
             "",
             "```text",
-            finding.fixPrompt,
+            finding.failureScenario
+              ? `${finding.fixPrompt}\n\nFailure scenario: ${finding.failureScenario}`
+              : finding.fixPrompt,
             "```",
             "",
             "</details>",

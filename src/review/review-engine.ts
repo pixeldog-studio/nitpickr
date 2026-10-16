@@ -1245,7 +1245,19 @@ export class ReviewEngine {
 
     return {
       result: {
-        summary: responses.map((response) => response.summary).join("\n\n"),
+        // One short paragraph even when the PR was reviewed in chunks: the
+        // first sentence of each chunk's summary, at most three.
+        summary:
+          responses.length === 1
+            ? maybeTrimSentenceCount(responses[0]?.summary ?? "", 2)
+            : maybeTrimSentenceCount(
+                responses
+                  .map((response) =>
+                    maybeTrimSentenceCount(response.summary, 1),
+                  )
+                  .join(" "),
+                3,
+              ),
         mermaid: renderMergedDiagram(responses),
         findings: mergedFindings,
         priorThreadVerdicts,
