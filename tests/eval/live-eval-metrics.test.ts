@@ -240,3 +240,37 @@ describe("resuming a run", () => {
     expect(progress).toEqual([2]);
   });
 });
+
+describe("learning pairs", () => {
+  it("reports whether a repo learning changed the review", async () => {
+    const { summarizeLearningPairs } = await import(
+      "../../src/eval/live-review-evaluator.js"
+    );
+    const pairs = summarizeLearningPairs([
+      report({
+        name: "dismissal-control",
+        kind: "learning",
+        matched: [{ expected: "timeout", finding: "f" }],
+        findings: [finding("medium")],
+      }),
+      report({ name: "dismissal-applied", kind: "learning", findings: [] }),
+      report({
+        name: "unchanged-control",
+        kind: "learning",
+        findings: [finding("medium")],
+        unexpected: ["x"],
+      }),
+      report({
+        name: "unchanged-applied",
+        kind: "learning",
+        findings: [finding("medium")],
+        unexpected: ["x"],
+      }),
+    ]);
+
+    expect(pairs.map((pair) => [pair.name, pair.learningApplied])).toEqual([
+      ["dismissal", true],
+      ["unchanged", false],
+    ]);
+  });
+});

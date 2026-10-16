@@ -258,6 +258,75 @@ export class MemoryService {
     };
   }
 
+  /**
+   * Remember that a finding was not wanted in this repo (refuted on
+   * reconsider, thumbs-down, or resolved by a human without a code change).
+   * Stored as an embedded, repo-scoped `dismissed_finding` memory: retrieved
+   * into later prompts and used to filter look-alike findings.
+   */
+  async recordDismissedFinding(input: {
+    tenantId: string;
+    repositoryId: string;
+    path: string | null;
+    title: string;
+    /** The finding's body; stored with the title so look-alikes match. */
+    body: string;
+    signal: "reconsider_refuted" | "thumbs_down" | "resolved_without_change";
+  }): Promise<MemoryEntry | null> {
+    // Stored as the finding's own words (not a description of it): the
+    // embedder matches finding-to-finding far better than finding-to-label.
+    const body = normalizeSummary(input.body).slice(0, 300);
+    return this.#persistEntry({
+      tenantId: input.tenantId,
+      repositoryId: input.repositoryId,
+      candidate: {
+        kind: "dismissed_finding",
+        summary: `${normalizeSummary(input.title).replace(/\.$/, "")}.${
+          body.length > 0 ? ` ${body}` : ""
+        }`,
+        tags: [input.signal],
+        globs: [],
+        confidence: input.signal === "reconsider_refuted" ? 0.8 : 0.6,
+      },
+      discussionPath: input.path,
+      now: this.#now().toISOString(),
+    });
+  }
+
+  /**
+   * Past dismissals in this repo that look like `text`. Empty when no
+   * embedder or vector search is available.
+   */
+  async findSimilarDismissals(input: {
+    tenantId: string;
+    repositoryId: string;
+    text: string;
+    minSimilarity: number;
+  }): Promise<Array<{ entry: MemoryEntry; similarity: number }>> {
+    if (!this.#embedder || !this.#store.findNearestNeighbors) {
+      return [];
+    }
+    try {
+      // Same purpose as stored dismissals: finding text against finding text.
+      const embedding = await this.#embedder.embed(input.text, "document");
+      const neighbors = await this.#store.findNearestNeighbors({
+        tenantId: input.tenantId,
+        repositoryId: input.repositoryId,
+        embedding,
+        kind: "dismissed_finding",
+        limit: 5,
+      });
+      return neighbors.filter(
+        (neighbor) => neighbor.similarity >= input.minSimilarity,
+      );
+    } catch (error) {
+      this.#logger.warn("memory.similar_dismissals_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
+  }
+
   async #classifyDiscussion(discussion: {
     authorLogin: string;
     body: string;

@@ -69,6 +69,8 @@ export const fixtureKinds = [
   "captured_clean",
   "multi_round",
   "injection",
+  /** Paired `<name>-control` / `<name>-applied` cases: same diff, with and without a repo learning in memory. */
+  "learning",
 ] as const;
 export const fixtureStacks = [
   "swift",
@@ -566,6 +568,55 @@ export function rescoreReport(
     return [rescored];
   });
   return { cases, totals: summarizeReport(cases) };
+}
+
+export interface LearningPairReport {
+  name: string;
+  control: { passed: boolean; findings: number };
+  applied: { passed: boolean; findings: number };
+  /** The learning changed the review and the applied case meets expectations. */
+  learningApplied: boolean;
+}
+
+function casePassed(entry: LiveCaseReport): boolean {
+  return (
+    entry.error === null &&
+    entry.missed.length === 0 &&
+    entry.unexpected.length === 0
+  );
+}
+
+/** Compare each `-control` case with its `-applied` twin. */
+export function summarizeLearningPairs(
+  cases: LiveCaseReport[],
+): LearningPairReport[] {
+  return cases.flatMap((control) => {
+    if (control.kind !== "learning" || !control.name.endsWith("-control")) {
+      return [];
+    }
+    const name = control.name.slice(0, -"-control".length);
+    const applied = cases.find((entry) => entry.name === `${name}-applied`);
+    if (!applied) {
+      return [];
+    }
+    const changed =
+      control.findings.length !== applied.findings.length ||
+      control.matched.length !== applied.matched.length;
+    return [
+      {
+        name,
+        control: {
+          passed: casePassed(control),
+          findings: control.findings.length,
+        },
+        applied: {
+          passed: casePassed(applied),
+          findings: applied.findings.length,
+        },
+        learningApplied: casePassed(applied) && changed,
+      },
+    ];
+  });
 }
 
 function median(values: number[]): number {

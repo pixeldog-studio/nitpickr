@@ -1,0 +1,37 @@
+{
+  "name": "learning-convention-applied",
+  "source": "synthetic",
+  "kind": "learning",
+  "stack": "typescript",
+  "expectedVerdicts": [],
+  "input": {
+    "changeRequest": {
+      "title": "Save watering reminders",
+      "number": 302
+    },
+    "files": [
+      {
+        "path": "src/reminders/repository.ts",
+        "additions": 13,
+        "deletions": 0,
+        "patch": "@@ -0,0 +1,13 @@\n+import type { SupabaseClient } from \"@supabase/supabase-js\";\n+\n+export async function saveReminder(\n+  supabase: SupabaseClient,\n+  userId: string,\n+  plantId: string,\n+  everyDays: number,\n+) {\n+  await supabase\n+    .from(\"watering_reminders\")\n+    .upsert({ user_id: userId, plant_id: plantId, every_days: everyDays });\n+  return { ok: true };\n+}",
+        "fileContent": "import type { SupabaseClient } from \"@supabase/supabase-js\";\n\nexport async function saveReminder(\n  supabase: SupabaseClient,\n  userId: string,\n  plantId: string,\n  everyDays: number,\n) {\n  await supabase\n    .from(\"watering_reminders\")\n    .upsert({ user_id: userId, plant_id: plantId, every_days: everyDays });\n  return { ok: true };\n}\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [
+      {
+        "summary": "supabase-js never throws on query failure; every call must check the returned `error`, or failed writes are reported as success. Flag any ignored `error`."
+      }
+    ],
+    "commentBudget": 10
+  },
+  "expectedFindings": [
+    {
+      "label": "upsert error ignored: supabase-js returns errors instead of throwing, so a failed write reports ok",
+      "path": "src/reminders/repository.ts",
+      "lineStart": 9,
+      "lineEnd": 11
+    }
+  ]
+}

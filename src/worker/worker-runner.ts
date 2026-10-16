@@ -29,6 +29,7 @@ import type { PromptOptimizationMode } from "../review/prompt-payload-optimizer.
 import type {
   ReviewEngine,
   ReviewEngineResult,
+  ReviewFinding,
 } from "../review/review-engine.js";
 import type { ReviewLifecycleService } from "../review/review-lifecycle-service.js";
 import type { ReviewPlanner } from "../review/review-planner.js";
@@ -352,6 +353,15 @@ function formatAcknowledgmentReply(input: {
 }
 
 const MAX_FILE_CONTENT_BYTES = 200_000;
+/**
+ * Cosine similarity (nomic-embed-text, finding text vs. stored finding text)
+ * at which a new finding repeats a dismissed one. Calibrated on real pairs:
+ * repeats scored 0.83-0.90, unrelated findings at most 0.69, and a related
+ * but more serious finding 0.80. High and critical findings need a near
+ * duplicate so an old nit cannot hide a serious new bug.
+ */
+const DISMISSAL_SIMILARITY = 0.82;
+const DISMISSAL_SIMILARITY_SEVERE = 0.92;
 const FILE_CONTENT_FETCH_CONCURRENCY = 6;
 
 async function fetchPrimaryFileContents(input: {
@@ -984,7 +994,14 @@ export interface WorkerRunnerDependencies {
     MemoryService,
     "getRelevantMemories" | "ingestDiscussion"
   > &
-    Partial<Pick<MemoryService, "selectMemoriesForReview">>;
+    Partial<
+      Pick<
+        MemoryService,
+        | "selectMemoriesForReview"
+        | "recordDismissedFinding"
+        | "findSimilarDismissals"
+      >
+    >;
   discussionAcknowledgmentStore?: DiscussionAcknowledgmentStore;
   now?: () => Date;
   feedbackService?: Pick<
@@ -1022,6 +1039,100 @@ export interface WorkerRunnerDependencies {
         "markSuperseded" | "markClosed" | "markRequeued"
       >
     >;
+}
+
+export interface LearnableThread {
+  threadId: string;
+  path: string;
+  fingerprint: string;
+  isResolved: boolean;
+  isOutdated?: boolean;
+  body: string;
+  reactionSummary: { negativeCount: number };
+}
+
+/**
+ * Learn from how people treated earlier nitpickr threads: a thread a human
+ * resolved without changing its lines, or one that got a thumbs-down, is a
+ * finding this repo does not want. Each settled thread is recorded once
+ * (published_comments.resolved_at marks it as processed; threads nitpickr
+ * resolved itself are already marked).
+ */
+export async function learnFromThreads(input: {
+  job: Pick<QueueJob, "id" | "tenantId" | "repositoryId">;
+  threads: LearnableThread[];
+  logger: Logger;
+  memoryService: Partial<Pick<MemoryService, "recordDismissedFinding">>;
+  feedbackService?: Pick<ReviewFeedbackService, "recordOutcome">;
+  reviewLifecycle: {
+    markPublishedCommentsResolved?: (ids: string[]) => Promise<number>;
+  };
+}): Promise<void> {
+  const { job, threads, logger } = input;
+  const record = input.memoryService.recordDismissedFinding?.bind(
+    input.memoryService,
+  );
+  for (const thread of threads) {
+    try {
+      const parsed = parseInlineCommentContext(thread.body);
+      if (thread.isResolved && thread.isOutdated !== true) {
+        const newlySettled =
+          (await input.reviewLifecycle.markPublishedCommentsResolved?.([
+            thread.threadId,
+          ])) ?? 0;
+        if (newlySettled > 0) {
+          await input.feedbackService?.recordOutcome({
+            tenantId: job.tenantId,
+            repositoryId: job.repositoryId,
+            events: [
+              {
+                fingerprint: thread.fingerprint,
+                path: thread.path,
+                category: categoryFromFingerprint(thread.fingerprint),
+                kind: "resolved_without_code_change",
+              },
+            ],
+          });
+          await record?.({
+            tenantId: job.tenantId,
+            repositoryId: job.repositoryId,
+            path: thread.path,
+            title: parsed.title,
+            body: parsed.body,
+            signal: "resolved_without_change",
+          });
+          logger.info("learning.resolved_without_code_change", {
+            jobId: job.id,
+            threadId: thread.threadId,
+          });
+          continue;
+        }
+      }
+      if (thread.reactionSummary.negativeCount > 0) {
+        await record?.({
+          tenantId: job.tenantId,
+          repositoryId: job.repositoryId,
+          path: thread.path,
+          title: parsed.title,
+          body: parsed.body,
+          signal: "thumbs_down",
+        });
+      }
+    } catch (error) {
+      logger.warn("learning.thread_failed", {
+        jobId: job.id,
+        threadId: thread.threadId,
+        error: toErrorMessage(error),
+      });
+    }
+  }
+}
+
+/** How a memory reads in the review prompt; dismissals say what they are. */
+export function memoryPromptText(entry: Pick<MemoryEntry, "kind" | "summary">) {
+  return entry.kind === "dismissed_finding" || entry.kind === "false_positive"
+    ? `Dismissed before, do not raise again: ${entry.summary}`
+    : entry.summary;
 }
 
 export class WorkerRunner {
@@ -1665,6 +1776,11 @@ export class WorkerRunner {
             pullNumber: payload.pullNumber,
           })
         : [];
+      await this.#learnFromThreads({
+        job,
+        threads: existingNitpickrThreads,
+        logger,
+      });
       if (this.#feedbackService && existingNitpickrThreads.length > 0) {
         await this.#feedbackService.syncCommentReactions({
           tenantId: job.tenantId,
@@ -1754,22 +1870,27 @@ export class WorkerRunner {
                   }),
                   scope: reviewScope,
                   optimizationMode: this.#promptOptimizationMode,
-                  instructionText: this.#renderInstructionText(
-                    instructionBundle,
-                    memories,
-                  ),
+                  // Memories go to the prompt once, in the memory section;
+                  // they no longer eat into the 4k instruction budget.
+                  instructionText: instructionBundle.combinedText,
                   memory: memories.map((entry) =>
                     entry.path
                       ? {
-                          summary: entry.summary,
+                          summary: memoryPromptText(entry),
                           path: entry.path,
                         }
                       : {
-                          summary: entry.summary,
+                          summary: memoryPromptText(entry),
                         },
                   ),
                   commentBudget: reviewPlan.commentBudget,
                   priorReviewRoundCount,
+                  ...(this.#memoryService.findSimilarDismissals
+                    ? {
+                        dismissalCheck: (finding: ReviewFinding) =>
+                          this.#dismissalFor(job, finding),
+                      }
+                    : {}),
                   severityFloor: severityFloorForRound(priorReviewRoundCount),
                   ...(feedbackSignals.length === 0 ? {} : { feedbackSignals }),
                   ...(priorThreads.length === 0 ? {} : { priorThreads }),
@@ -2424,6 +2545,16 @@ export class WorkerRunner {
             });
           }
         }
+        if (result.resolve) {
+          await this.#memoryService.recordDismissedFinding?.({
+            tenantId: job.tenantId,
+            repositoryId: job.repositoryId,
+            path: thread.path,
+            title: thread.title,
+            body: thread.body,
+            signal: "reconsider_refuted",
+          });
+        }
         logger.info("Reconsidered finding with the verifier.", {
           jobId: job.id,
           verdict: result.verdict,
@@ -2489,7 +2620,33 @@ export class WorkerRunner {
           entry.path ? `${entry.path}: ${entry.summary}` : entry.summary,
         ),
       });
-      return { body: answer, feedbackEvents: [], memoryDiscussions: [] };
+      // What people tell nitpickr in conversation is a learning candidate;
+      // the memory classifier decides what, if anything, to keep.
+      const learned =
+        question.length > 0
+          ? await this.#memoryService
+              .ingestDiscussion({
+                tenantId: job.tenantId,
+                repositoryId: job.repositoryId,
+                discussions: [
+                  {
+                    authorLogin: payload.actorLogin,
+                    body: question,
+                    path: thread?.path ?? null,
+                  },
+                ],
+              })
+              .catch(() => ({ acknowledgments: [], savedEntries: [] }))
+          : { acknowledgments: [], savedEntries: [] };
+      const remembered = learned.savedEntries.map((entry) => entry.summary);
+      return {
+        body:
+          remembered.length === 0
+            ? answer
+            : `${answer}\n\nI'll remember for this repo: ${remembered.join("; ")}`,
+        feedbackEvents: [],
+        memoryDiscussions: [],
+      };
     } catch (error) {
       logger.warn("Model-backed reply failed.", {
         jobId: job.id,
@@ -2510,6 +2667,41 @@ export class WorkerRunner {
         memoryDiscussions: [],
       };
     }
+  }
+
+  async #learnFromThreads(input: {
+    job: QueueJob;
+    threads: LearnableThread[];
+    logger: Logger;
+  }): Promise<void> {
+    await learnFromThreads({
+      ...input,
+      memoryService: this.#memoryService,
+      ...(this.#feedbackService
+        ? { feedbackService: this.#feedbackService }
+        : {}),
+      reviewLifecycle: this.#reviewLifecycle,
+    });
+  }
+
+  async #dismissalFor(
+    job: QueueJob,
+    finding: ReviewFinding,
+  ): Promise<string | null> {
+    const matches =
+      (await this.#memoryService.findSimilarDismissals?.({
+        tenantId: job.tenantId,
+        repositoryId: job.repositoryId,
+        text: `${finding.title}. ${finding.body}`,
+        minSimilarity:
+          finding.severity === "high" || finding.severity === "critical"
+            ? DISMISSAL_SIMILARITY_SEVERE
+            : DISMISSAL_SIMILARITY,
+      })) ?? [];
+    const best = matches[0];
+    return best
+      ? `${best.entry.summary} (similarity ${best.similarity.toFixed(2)})`
+      : null;
   }
 
   async #processMemoryJob(job: QueueJob, jobLogger: Logger): Promise<void> {
@@ -2606,24 +2798,6 @@ export class WorkerRunner {
       savedEntries: ingestion.savedEntries.length,
       acknowledged: ack !== null,
     });
-  }
-
-  #renderInstructionText(
-    instructionBundle: InstructionBundle,
-    memories: MemoryEntry[],
-  ): string {
-    if (memories.length === 0) {
-      return instructionBundle.combinedText;
-    }
-
-    return [
-      instructionBundle.combinedText,
-      "",
-      "Retrieved memory:",
-      ...memories.map((entry) =>
-        entry.path ? `${entry.path}: ${entry.summary}` : entry.summary,
-      ),
-    ].join("\n");
   }
 
   async #publishReviewStatus<T>(

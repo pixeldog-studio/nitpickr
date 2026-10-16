@@ -8,6 +8,7 @@ import {
   type LiveEvaluationTotals,
   LiveReviewEvaluator,
   loadLiveEvaluationFixtures,
+  summarizeLearningPairs,
   summarizeReport,
   UsageTracker,
 } from "../eval/live-review-evaluator.js";
@@ -182,6 +183,11 @@ export class EvalLiveReviewsCommand {
     const totals = report.totals;
     write("");
     write(formatTotals("Totals", totals));
+    for (const pair of summarizeLearningPairs(report.cases)) {
+      write(
+        `  learning ${pair.name}: control ${pair.control.findings} finding(s) ${pair.control.passed ? "pass" : "fail"} | with learning ${pair.applied.findings} finding(s) ${pair.applied.passed ? "pass" : "fail"} | learning applied: ${pair.learningApplied ? "yes" : "no"}`,
+      );
+    }
     for (const [group, entries] of [
       ["stack", totals.byStack],
       ["kind", totals.byKind],
