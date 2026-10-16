@@ -11,6 +11,7 @@ export type EvidenceGateReason =
   | "style_category"
   | "evidence_not_in_code"
   | "refuted_by_verifier"
+  | "duplicates_nearby_finding"
   | "unconfirmed_below_floor"
   | "suppressed_by_feedback";
 

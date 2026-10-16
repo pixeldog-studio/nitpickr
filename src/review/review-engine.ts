@@ -821,6 +821,30 @@ function dedupeAndRankFindings(findings: ReviewFinding[]): ReviewFinding[] {
   return [...deduped.values()].sort(compareFindings);
 }
 
+/** Lines apart at which two findings on one file describe the same spot. */
+const NEARBY_FINDING_LINES = 3;
+
+/**
+ * One comment per spot: models often flag the same defect twice from
+ * different angles (or from two chunks). Keeps the first (best ranked)
+ * finding on each path within a few lines of each other.
+ */
+export function collapseNearbyFindings<
+  TFinding extends { path: string; line: number },
+>(findings: TFinding[]): { kept: TFinding[]; collapsed: TFinding[] } {
+  const kept: TFinding[] = [];
+  const collapsed: TFinding[] = [];
+  for (const finding of findings) {
+    const duplicate = kept.some(
+      (existing) =>
+        existing.path === finding.path &&
+        Math.abs(existing.line - finding.line) <= NEARBY_FINDING_LINES,
+    );
+    (duplicate ? collapsed : kept).push(finding);
+  }
+  return { kept, collapsed };
+}
+
 function mergeMermaid(diagrams: string[]): string {
   if (diagrams.length === 0) {
     return defaultMermaidDiagram;
@@ -1173,7 +1197,8 @@ export class ReviewEngine {
         : { publishableFindingTypes: input.publishableFindingTypes }),
     });
 
-    const verified = await this.#verify(gatedFindings.acceptedFindings, input);
+    const nearby = collapseNearbyFindings(gatedFindings.acceptedFindings);
+    const verified = await this.#verify(nearby.kept, input);
 
     return {
       result: {
@@ -1182,6 +1207,11 @@ export class ReviewEngine {
       },
       rejectedFindings: [
         ...gatedFindings.rejectedFindings,
+        ...nearby.collapsed.map((finding) => ({
+          finding,
+          findingFingerprint: fingerprintFinding(finding),
+          reasons: ["duplicates_nearby_finding" as const],
+        })),
         ...verified.rejected,
       ],
       promptUsage: reviewed.promptUsage,

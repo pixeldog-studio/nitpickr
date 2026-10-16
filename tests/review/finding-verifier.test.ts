@@ -17,6 +17,28 @@ const file = {
   fileContent: "const a = 1;\nif (!user) return;\ndeleteUser(user.id);\n",
 };
 
+/** Twelve changed lines so findings can sit far apart (not collapsed). */
+const wideFile = {
+  path: "src/users.ts",
+  patch: [
+    "@@ -0,0 +1,12 @@",
+    ...Array.from({ length: 12 }, (_, index) =>
+      index === 1
+        ? "+if (!user) return;"
+        : index === 6 || index === 11
+          ? "+deleteUser(user.id);"
+          : `+const v${index} = ${index};`,
+    ),
+  ].join("\n"),
+  fileContent: `${Array.from({ length: 12 }, (_, index) =>
+    index === 1
+      ? "if (!user) return;"
+      : index === 6 || index === 11
+        ? "deleteUser(user.id);"
+        : `const v${index} = ${index};`,
+  ).join("\n")}\n`,
+};
+
 describe("decideVerification", () => {
   it("confirms only when the quoted lines exist in the code", () => {
     expect(
@@ -189,9 +211,9 @@ describe("ReviewEngine with the verifier", () => {
         return {
           summary: "s",
           findings: [
-            finding(3, "Real bug", "deleteUser(user.id);"),
+            finding(7, "Real bug", "deleteUser(user.id);"),
             finding(2, "Wrong claim", "if (!user) return;"),
-            finding(3, "Maybe bug", "deleteUser(user.id);"),
+            finding(12, "Maybe bug", "deleteUser(user.id);"),
           ],
           priorThreadVerdicts: [],
         };
@@ -202,7 +224,7 @@ describe("ReviewEngine with the verifier", () => {
       verifier: { maxFindings: 6 },
     }).reviewWithDiagnostics({
       changeRequest: { title: "t", number: 1 },
-      files: [{ ...file, additions: 2, deletions: 0 }],
+      files: [{ ...wideFile, additions: 12, deletions: 0 }],
       instructionText: "",
       memory: [],
       commentBudget: 5,
@@ -227,9 +249,9 @@ describe("ReviewEngine with the verifier", () => {
 });
 
 describe("ReviewEngine verifier outcomes", () => {
-  const finding = (title: string, severity: string) => ({
+  const finding = (title: string, severity: string, line = 7) => ({
     path: "src/users.ts",
-    line: 3,
+    line,
     findingType: "bug",
     severity,
     category: "security",
@@ -260,7 +282,7 @@ describe("ReviewEngine verifier outcomes", () => {
           summary: "s",
           findings: [
             finding("Verifier fails", "medium"),
-            finding("Refuted critical", "critical"),
+            finding("Refuted critical", "critical", 12),
           ],
           priorThreadVerdicts: [],
         };
@@ -271,7 +293,7 @@ describe("ReviewEngine verifier outcomes", () => {
       verifier: { maxFindings: 6 },
     }).reviewWithDiagnostics({
       changeRequest: { title: "t", number: 1 },
-      files: [{ ...file, additions: 2, deletions: 0 }],
+      files: [{ ...wideFile, additions: 12, deletions: 0 }],
       instructionText: "",
       memory: [],
       commentBudget: 5,
@@ -284,5 +306,25 @@ describe("ReviewEngine verifier outcomes", () => {
       ["Refuted critical", "high"],
       ["Verifier fails", "medium"],
     ]);
+  });
+});
+
+describe("collapseNearbyFindings", () => {
+  it("keeps one finding per spot", async () => {
+    const { collapseNearbyFindings } = await import(
+      "../../src/review/review-engine.js"
+    );
+    const result = collapseNearbyFindings([
+      { path: "a.ts", line: 10, title: "first" },
+      { path: "a.ts", line: 12, title: "same spot" },
+      { path: "a.ts", line: 30, title: "elsewhere" },
+      { path: "b.ts", line: 11, title: "other file" },
+    ]);
+    expect(result.kept.map((entry) => entry.title)).toEqual([
+      "first",
+      "elsewhere",
+      "other file",
+    ]);
+    expect(result.collapsed.map((entry) => entry.title)).toEqual(["same spot"]);
   });
 });
