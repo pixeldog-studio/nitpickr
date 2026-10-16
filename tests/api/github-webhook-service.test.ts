@@ -255,6 +255,36 @@ describe("GitHubWebhookService", () => {
     });
   });
 
+  it("keys automatic review jobs by head commit", async () => {
+    const adapter = new FakeGitHubAdapter();
+    const headSha = "a".repeat(40);
+    adapter.normalizedEvent = {
+      ...adapter.normalizedEvent,
+      kind: "review_requested",
+      trigger: { type: "pr_synchronized", actorLogin: "ruben" },
+      mode: "quick",
+      headSha,
+    } as GitHubNormalizedEvent;
+    const queue = new FakeQueueScheduler();
+    const service = new GitHubWebhookService(
+      adapter,
+      queue,
+      new FakeWebhookEventService(),
+      new FakeLogger(),
+    );
+
+    await service.handle({
+      deliveryId: "delivery-sync",
+      eventName: "pull_request",
+      signature: "sha256=test",
+      rawBody: "{}",
+      payload: {},
+    });
+
+    expect(queue.calls[0]?.dedupeKey).toBe(`github:99:42:quick:${headSha}`);
+    expect(queue.calls[0]?.payload.headSha).toBe(headSha);
+  });
+
   it("reacts to issue comment mentions before queueing work", async () => {
     const adapter = new FakeGitHubAdapter();
     adapter.mentionReaction = {

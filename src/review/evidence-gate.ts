@@ -5,6 +5,8 @@ export type EvidenceGateReason =
   | "path_not_in_scope"
   | "line_not_in_changed_context"
   | "finding_type_not_publishable"
+  | "below_severity_floor"
+  | "duplicates_open_thread"
   | "suppressed_by_feedback";
 
 export interface ReviewFeedbackSignal {
@@ -55,6 +57,9 @@ function patchIncludesLine(patch: string, line: number): boolean {
 }
 
 export type Severity = "low" | "medium" | "high" | "critical";
+
+/** Lines on either side of an open thread that count as the same spot. */
+export const OPEN_THREAD_LINE_WINDOW = 3;
 
 export function severityWeight(severity: Severity): number {
   switch (severity) {
@@ -150,18 +155,22 @@ function compareFindingsWithFeedback(
 export function gateAndRankFindings<TFinding extends GateFinding>(input: {
   findings: TFinding[];
   files: ScopedFile[];
-  contextFiles?: ScopedFile[];
   feedbackSignals?: ReviewFeedbackSignal[];
   publishableFindingTypes?: string[];
+  /** Findings below this severity are rejected; null/undefined keeps all. */
+  minimumSeverity?: Severity | null;
+  /**
+   * Locations of nitpickr threads that are still open on the PR. A finding
+   * this close to one repeats it: models re-raise open threads even when told
+   * not to, which is how one PR ended up with contradicting comments.
+   */
+  openThreads?: Array<{ path: string; line: number; category?: string }>;
 }): {
   acceptedFindings: TFinding[];
   rejectedFindings: EvidenceGateRejectedFinding<TFinding>[];
 } {
   const scopedFiles = new Map(
-    [...(input.contextFiles ?? []), ...input.files].map((file) => [
-      file.path,
-      file.patch,
-    ]),
+    input.files.map((file) => [file.path, file.patch]),
   );
   const feedbackSignals = input.feedbackSignals ?? [];
   const rejectedFindings: EvidenceGateRejectedFinding<TFinding>[] = [];
@@ -189,6 +198,25 @@ export function gateAndRankFindings<TFinding extends GateFinding>(input: {
       !input.publishableFindingTypes.includes(finding.findingType)
     ) {
       reasons.push("finding_type_not_publishable");
+    }
+
+    if (
+      input.minimumSeverity != null &&
+      severityWeight(finding.severity) < severityWeight(input.minimumSeverity)
+    ) {
+      reasons.push("below_severity_floor");
+    }
+
+    if (
+      (input.openThreads ?? []).some(
+        (thread) =>
+          thread.path === finding.path &&
+          (thread.category === undefined ||
+            thread.category === finding.category) &&
+          Math.abs(thread.line - finding.line) <= OPEN_THREAD_LINE_WINDOW,
+      )
+    ) {
+      reasons.push("duplicates_open_thread");
     }
 
     if (isSuppressedByFeedback(finding, feedbackSignals)) {

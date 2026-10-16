@@ -297,6 +297,8 @@ export class PostgresJobStore implements JobStore {
     repositoryId: string;
     changeRequestId: string;
     headSha: string;
+    /** Only jobs queued before the running one; newer pushes keep theirs. */
+    createdBefore: Date;
   }): Promise<number> {
     const rows = await this.#client.unsafe<{ canceled_count: number }>(
       `
@@ -308,13 +310,20 @@ export class PostgresJobStore implements JobStore {
             and status = 'queued'
             and repository_id = $1
             and change_request_id = $2
-            and coalesce(payload->>'headSha', '') <> $3
+            and payload->>'headSha' is not null
+            and payload->>'headSha' <> $3
+            and created_at < $4
           returning id
         )
         select count(*)::int as canceled_count
         from canceled
       `,
-      [input.repositoryId, input.changeRequestId, input.headSha],
+      [
+        input.repositoryId,
+        input.changeRequestId,
+        input.headSha,
+        input.createdBefore,
+      ],
     );
 
     return rows[0]?.canceled_count ?? 0;

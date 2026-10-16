@@ -374,6 +374,68 @@ describe("GitHubRestClient", () => {
     );
   });
 
+  it("keeps outdated threads using their original line", async () => {
+    const client = new GitHubRestClient(
+      {
+        async getInstallationAccessToken() {
+          return "ghs_token";
+        },
+      },
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: {
+              repository: {
+                pullRequest: {
+                  reviewThreads: {
+                    nodes: [
+                      {
+                        id: "thread_outdated",
+                        isResolved: false,
+                        isOutdated: true,
+                        comments: {
+                          nodes: [
+                            {
+                              id: "comment_9",
+                              databaseId: 9001,
+                              body: "Missing timeout\n<!-- nitpickr:fingerprint:fp_9 -->",
+                              author: { login: "getnitpickr" },
+                              path: "src/users.ts",
+                              line: null,
+                              originalLine: 5,
+                              reactionGroups: [],
+                            },
+                          ],
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+
+    const threads = await client.listNitpickrReviewThreads({
+      installationId: "123456",
+      owner: "rubenspessoa",
+      repo: "nitpickr",
+      pullNumber: 42,
+      botLogins: ["getnitpickr"],
+    });
+
+    expect(threads).toEqual([
+      expect.objectContaining({
+        threadId: "thread_outdated",
+        line: 5,
+        isOutdated: true,
+        isResolved: false,
+      }),
+    ]);
+  });
+
   it("lists nitpickr review threads and resolves them through GraphQL", async () => {
     const requestedBodies: string[] = [];
     const client = new GitHubRestClient(
@@ -476,6 +538,7 @@ describe("GitHubRestClient", () => {
         line: 27,
         fingerprint: "fp_1",
         isResolved: false,
+        isOutdated: false,
         body: ["nitpickr comment", "<!-- nitpickr:fingerprint:fp_1 -->"].join(
           "\n",
         ),

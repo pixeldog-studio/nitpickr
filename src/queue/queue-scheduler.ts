@@ -67,6 +67,8 @@ export interface JobStore {
     repositoryId: string;
     changeRequestId: string;
     headSha: string;
+    /** Only jobs queued before the running one; newer pushes keep theirs. */
+    createdBefore: Date;
   }): Promise<number>;
   requeueStaleRunningJobs(input: {
     activeWorkerIds: string[];
@@ -195,6 +197,8 @@ export class QueueScheduler {
     repositoryId: string;
     changeRequestId: string;
     headSha: string;
+    /** Only jobs queued before the running one; newer pushes keep theirs. */
+    createdBefore: Date;
   }): Promise<number> {
     assertNonEmpty(input.repositoryId, "repositoryId");
     assertNonEmpty(input.changeRequestId, "changeRequestId");

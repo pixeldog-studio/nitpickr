@@ -450,6 +450,19 @@ function isInlineCommentResolutionError(error: unknown): boolean {
   );
 }
 
+/**
+ * The line that tells the author where the PR stands once a round has no new
+ * findings: either nothing is left, or which earlier threads still are.
+ */
+export function buildEndStateLine(openThreads: number): string {
+  if (openThreads === 0) {
+    return "**No further comments.** Every nitpickr thread on this PR is resolved; it's over to a human reviewer.";
+  }
+  return `No new findings. ${openThreads} earlier ${
+    openThreads === 1 ? "thread is" : "threads are"
+  } still open.`;
+}
+
 function shortSha(sha: string | undefined): string | null {
   if (!sha) {
     return null;
@@ -512,8 +525,10 @@ export class ReviewPublisher {
     ].join("\n");
   }
 
-  buildFollowUpBody(reviewRunId: string): string {
-    return buildReviewRunMarker(reviewRunId);
+  buildFollowUpBody(reviewRunId: string, statusLine?: string | null): string {
+    return statusLine
+      ? [buildReviewRunMarker(reviewRunId), "", statusLine].join("\n")
+      : buildReviewRunMarker(reviewRunId);
   }
 
   buildCommitSummaryBody(input: {
@@ -523,11 +538,10 @@ export class ReviewPublisher {
     counts: {
       newFindings: number;
       resolvedThreads: number;
-      stillRelevantFindings: number;
+      openThreads: number;
     };
   }): string {
     const commitLabel = shortSha(input.reviewedCommitSha);
-    const cleanState = input.counts.newFindings === 0;
 
     return [
       buildReviewRunMarker(input.reviewRunId),
@@ -537,11 +551,12 @@ export class ReviewPublisher {
       commitLabel ? `**Commit:** \`${commitLabel}\`` : null,
       `> ${input.summary.trim()}`,
       "",
-      cleanState
-        ? "No concerning issues found in this push. Please do a final human review before merge."
-        : `New findings: ${input.counts.newFindings}`,
-      `Resolved stale threads: ${input.counts.resolvedThreads}`,
-      `Still relevant findings: ${input.counts.stillRelevantFindings}`,
+      input.counts.newFindings > 0
+        ? `New findings: ${input.counts.newFindings}`
+        : buildEndStateLine(input.counts.openThreads),
+      input.counts.resolvedThreads > 0
+        ? `Resolved threads: ${input.counts.resolvedThreads}`
+        : null,
     ]
       .filter((line): line is string => line !== null)
       .join("\n");
@@ -629,6 +644,8 @@ export class ReviewPublisher {
     commitSummaryCounts?: {
       resolvedThreads: number;
     };
+    /** Earlier nitpickr threads still unresolved after this round. */
+    openPriorThreadCount?: number;
     result: {
       summary: string;
       mermaid: string;
@@ -675,16 +692,7 @@ export class ReviewPublisher {
             files: input.files,
           });
 
-    if (
-      input.publishMode === "pr_summary" &&
-      existingSummaryReview &&
-      comments.length === 0
-    ) {
-      return {
-        reviewId: existingSummaryReview.reviewId,
-      };
-    }
-
+    const openThreads = input.openPriorThreadCount ?? 0;
     const body =
       input.publishMode === "commit_summary"
         ? this.buildCommitSummaryBody({
@@ -693,14 +701,17 @@ export class ReviewPublisher {
             counts: {
               newFindings: comments.length,
               resolvedThreads: input.commitSummaryCounts?.resolvedThreads ?? 0,
-              stillRelevantFindings: comments.length,
+              openThreads,
             },
             ...(input.reviewedCommitSha
               ? { reviewedCommitSha: input.reviewedCommitSha }
               : {}),
           })
         : existingSummaryReview
-          ? this.buildFollowUpBody(input.reviewRunId)
+          ? this.buildFollowUpBody(
+              input.reviewRunId,
+              comments.length === 0 ? buildEndStateLine(openThreads) : null,
+            )
           : this.buildSummaryBody({
               reviewRunId: input.reviewRunId,
               summary: input.result.summary,

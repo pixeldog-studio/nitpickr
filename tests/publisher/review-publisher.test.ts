@@ -763,7 +763,7 @@ describe("ReviewPublisher", () => {
     expect(client.calls).toHaveLength(0);
   });
 
-  it("does not create another summary review once nitpickr already posted one", async () => {
+  it("posts a short end-state follow-up instead of a second summary", async () => {
     const client = new FakePublishReviewClient();
     client.existingReviews = [
       {
@@ -793,8 +793,10 @@ describe("ReviewPublisher", () => {
       },
     });
 
-    expect(published.reviewId).toBe("review_summary");
-    expect(client.calls).toHaveLength(0);
+    expect(published.reviewId).toBe("review_1");
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0]?.body).not.toContain("# nitpickr review");
+    expect(client.calls[0]?.body).toContain("**No further comments.**");
   });
 
   it("publishes later review comments without another visible summary", async () => {
@@ -913,10 +915,7 @@ describe("ReviewPublisher", () => {
 
     expect(client.calls[0]?.comments).toHaveLength(0);
     expect(client.calls[0]?.body).not.toContain("New findings: 1");
-    expect(client.calls[0]?.body).toContain(
-      "No concerning issues found in this push.",
-    );
-    expect(client.calls[0]?.body).toContain("Still relevant findings: 0");
+    expect(client.calls[0]?.body).toContain("**No further comments.**");
   });
 
   it("publishes a visible clean commit summary even when there are no findings", async () => {
@@ -956,11 +955,9 @@ describe("ReviewPublisher", () => {
     expect(published.reviewId).toBe("review_1");
     expect(client.calls).toHaveLength(1);
     expect(client.calls[0]?.comments).toHaveLength(0);
-    expect(client.calls[0]?.body).toContain(
-      "No concerning issues found in this push.",
-    );
-    expect(client.calls[0]?.body).toContain("final human review before merge");
-    expect(client.calls[0]?.body).toContain("Resolved stale threads: 2");
+    expect(client.calls[0]?.body).toContain("**No further comments.**");
+    expect(client.calls[0]?.body).toContain("over to a human reviewer");
+    expect(client.calls[0]?.body).toContain("Resolved threads: 2");
   });
 
   it("rejects publish calls with no repository owner", async () => {

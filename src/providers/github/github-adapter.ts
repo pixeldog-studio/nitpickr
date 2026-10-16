@@ -186,6 +186,7 @@ export interface GitHubApiClient {
       line: number;
       fingerprint: string;
       isResolved: boolean;
+      isOutdated?: boolean;
       body: string;
       reactionSummary: {
         positiveCount: number;
@@ -306,6 +307,8 @@ export type GitHubNormalizedEvent =
       trigger: ReviewTrigger;
       mode: NormalizedReviewMode;
       actorLogin: string;
+      /** Head commit for pull_request events; comment commands have none. */
+      headSha?: string;
     }
   | {
       kind: "interaction_requested";
@@ -567,6 +570,7 @@ export class GitHubAdapter {
         trigger,
         mode: parsed.action === "synchronize" ? "quick" : "full",
         actorLogin: parsed.pull_request.user.login,
+        headSha: parsed.pull_request.head.sha,
       };
     }
 
@@ -899,6 +903,7 @@ export class GitHubAdapter {
       line: number;
       fingerprint: string;
       isResolved: boolean;
+      isOutdated?: boolean;
       body: string;
       reactionSummary: {
         positiveCount: number;

@@ -1,6 +1,16 @@
 export type PriorThreadState = "open" | "resolved" | "dismissed" | "stale";
 
+export type PriorThreadVerdict = "fixed" | "still_applies" | "obsolete";
+
 export interface PriorThread {
+  /** Short stable id the model uses to return a verdict, e.g. "T1". */
+  id: string;
+  /**
+   * True when this push changed the lines around the thread, so the model
+   * must say whether the push fixed it. Threads are only resolved on an
+   * explicit verdict, never because a finding was not raised again.
+   */
+  needsVerdict: boolean;
   path: string;
   line: number;
   state: PriorThreadState;
@@ -79,7 +89,9 @@ function renderPriorThreads(threads: PriorThread[] | undefined): string {
     }
 
     const lines = bucket.map((thread) => {
-      const head = `- ${thread.path}:${thread.line} — ${thread.title}`;
+      const head = `- [${thread.id}] ${thread.path}:${thread.line} — ${thread.title}${
+        thread.needsVerdict ? " (verdict needed)" : ""
+      }`;
       if (thread.userReply && thread.userReply.trim().length > 0) {
         return `${head}\n  user reply: ${thread.userReply.trim()}`;
       }
@@ -100,7 +112,7 @@ export class PromptBuilder {
     return {
       system: [
         "You are nitpickr, an AI pull request reviewer.",
-        "Return strict JSON with keys: summary, diagram, findings.",
+        "Return strict JSON with keys: summary, diagram, findings, priorThreadVerdicts.",
         'Prefer `diagram.type = "sequence"` for pull request review flows.',
         'Use `diagram.type = "flowchart"` only when a single component\'s internal logic is the main story.',
         "Do not return raw Mermaid text. Return a structured diagram object instead.",
@@ -123,6 +135,7 @@ export class PromptBuilder {
         "When 'Full file at HEAD' is present, treat it as context only — every finding must still reference a line that appears in the patch.",
         "When 'Prior nitpickr threads on this PR' is present, do not re-raise findings represented by an open, resolved, or stale prior thread at the same path/line/category.",
         "Do not raise findings for dismissed threads unless the new diff materially changes the situation.",
+        "For every prior thread marked '(verdict needed)', add { threadId, verdict } to priorThreadVerdicts: 'fixed' when the patch resolves the issue, 'obsolete' when the code it described is gone, otherwise 'still_applies'. Return an empty array when no thread needs a verdict.",
         "Stay consistent with prior recommendations. If you now believe a prior recommendation was wrong, say so explicitly in the body and reference the prior thread's title.",
         "When 'Review round' is 2 or higher, only raise findings of severity 'medium' or above.",
         "When 'Review round' is 4 or higher, only raise findings of severity 'high' or 'critical'.",

@@ -105,6 +105,8 @@ describe("PromptBuilder", () => {
       commentBudget: 5,
       priorThreads: [
         {
+          id: "T1",
+          needsVerdict: true,
           path: "src/auth/session.ts",
           line: 12,
           state: "open",
@@ -112,6 +114,8 @@ describe("PromptBuilder", () => {
           fingerprint: "src/auth/session.ts:12:security:verify_token",
         },
         {
+          id: "T2",
+          needsVerdict: false,
           path: "src/auth/session.ts",
           line: 30,
           state: "dismissed",
@@ -120,6 +124,8 @@ describe("PromptBuilder", () => {
           userReply: "Intentional — we want strict freshness.",
         },
         {
+          id: "T3",
+          needsVerdict: false,
           path: "src/auth/session.ts",
           line: 45,
           state: "resolved",
@@ -127,6 +133,8 @@ describe("PromptBuilder", () => {
           fingerprint: "src/auth/session.ts:45:security:constant_time",
         },
         {
+          id: "T4",
+          needsVerdict: false,
           path: "src/auth/session.ts",
           line: 99,
           state: "stale",
@@ -138,16 +146,16 @@ describe("PromptBuilder", () => {
 
     expect(prompt.user).toContain("Prior nitpickr threads on this PR:");
     expect(prompt.user).toContain(
-      "open:\n- src/auth/session.ts:12 — Verify token",
+      "open:\n- [T1] src/auth/session.ts:12 — Verify token signature before issuing session (verdict needed)",
     );
     expect(prompt.user).toContain(
-      "dismissed:\n- src/auth/session.ts:30 — Consider caching the JWKS\n  user reply: Intentional — we want strict freshness.",
+      "dismissed:\n- [T2] src/auth/session.ts:30 — Consider caching the JWKS\n  user reply: Intentional — we want strict freshness.",
     );
     expect(prompt.user).toContain(
-      "resolved:\n- src/auth/session.ts:45 — Use constant-time compare for tokens",
+      "resolved:\n- [T3] src/auth/session.ts:45 — Use constant-time compare for tokens",
     );
     expect(prompt.user).toContain(
-      "stale:\n- src/auth/session.ts:99 — Old finding on a line that is no longer in the diff",
+      "stale:\n- [T4] src/auth/session.ts:99 — Old finding on a line that is no longer in the diff",
     );
     expect(prompt.system).toContain(
       "do not re-raise findings represented by an open, resolved, or stale prior thread",

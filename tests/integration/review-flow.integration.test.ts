@@ -886,7 +886,7 @@ describe("review flow integration", () => {
     });
   });
 
-  it("processes synchronize events as commit-delta reviews with full PR context and resolves stale nitpickr threads", async () => {
+  it("processes synchronize events as commit-delta reviews and resolves threads the model marks fixed", async () => {
     const harness = createHarness();
     servers.push(harness.server);
 
@@ -997,6 +997,7 @@ describe("review flow integration", () => {
             "In `src/api/server.ts` around line 13, guard malformed JSON before processing the webhook.",
         },
       ],
+      priorThreadVerdicts: [{ threadId: "T1", verdict: "fixed" }],
     };
 
     const payload = JSON.stringify({
