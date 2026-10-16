@@ -1,7 +1,7 @@
 import { renderReviewLenses } from "./review-lenses.js";
 import {
+  revealInvisible,
   sanitizeUntrustedProse,
-  stripInvisible,
   UNTRUSTED_CONTENT_RULE,
 } from "./untrusted-content.js";
 
@@ -178,12 +178,12 @@ export class PromptBuilder {
             "Patch:",
             file.patch === null
               ? "Patch unavailable."
-              : stripInvisible(file.patch),
+              : revealInvisible(file.patch),
           ];
           if (file.fileContent !== undefined && file.fileContent !== null) {
             sections.push(
               "Full file at HEAD (for context only — review against the patch):",
-              stripInvisible(file.fileContent),
+              revealInvisible(file.fileContent),
             );
           }
           return sections.join("\n");

@@ -12,9 +12,22 @@ const INVISIBLE_CHARACTERS = /[​-‏‪-‮⁠-⁤⁦-⁩﻿]|[\u{E0000}-\u{E0
 
 const HTML_COMMENT = /<!--[\s\S]*?-->/g;
 
-/** Strip characters a human reviewer cannot see. Safe for code. */
+/** Strip characters a human reviewer cannot see (for prose). */
 export function stripInvisible(value: string): string {
   return value.replace(INVISIBLE_CHARACTERS, "");
+}
+
+/**
+ * For code: make invisible and bidi characters visible as `<U+202E>` rather
+ * than deleting them, so a Trojan Source change (CVE-2021-42574) or a
+ * look-alike identifier stays reviewable instead of being hidden.
+ */
+export function revealInvisible(value: string): string {
+  return value.replace(
+    INVISIBLE_CHARACTERS,
+    (character) =>
+      `<U+${(character.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0")}>`,
+  );
 }
 
 /**

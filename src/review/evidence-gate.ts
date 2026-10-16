@@ -1,5 +1,6 @@
 import { targetReviewCommentLine } from "../publisher/review-comment-targeter.js";
 import { fingerprintFinding } from "./finding-fingerprint.js";
+import { revealInvisible } from "./untrusted-content.js";
 
 export type EvidenceGateReason =
   | "path_not_in_scope"
@@ -47,36 +48,46 @@ interface ScopedFile {
 }
 
 function normalizeCodeLine(line: string): string {
-  return line
-    .replace(/^[+\- ]/, "")
+  return revealInvisible(line)
+    .replace(/^\s*\d+:\s?/, "") // line numbers the verifier is shown
+    .replace(/^[+\- ]/, "") // diff markers
     .replace(/\s+/g, " ")
     .trim();
 }
 
+/** A quote line that only marks omitted code: `...`, `…`, `// ...`. */
+const ELISION_LINE = /^(?:\/\/|#|--|\/\*)?\s*(?:\.\.\.|…)\s*(?:\*\/)?$/;
+const INLINE_ELISION = /\.\.\.|…/;
+/** Shorter pieces match too easily to count as evidence. */
+const MIN_FRAGMENT_LENGTH = 3;
+
 /**
- * True when every non-empty line the model quoted appears in the patch or the
- * file at HEAD (diff markers and whitespace ignored). Quotes that match
- * nothing mean the finding describes code that is not there.
+ * True when every quoted fragment appears in the patch or the file at HEAD,
+ * ignoring diff markers, line-number prefixes, whitespace and line breaks,
+ * and treating `...`/`…` as an elision. Quotes that match nothing mean the
+ * finding describes code that is not there.
  */
 export function evidenceAppearsInCode(
   evidence: string,
   file: ScopedFile,
 ): boolean {
-  const haystack = new Set(
-    [file.patch ?? "", file.fileContent ?? ""]
-      .flatMap((text) => text.split("\n"))
-      .map(normalizeCodeLine)
-      .filter((line) => line.length > 0),
-  );
-  const haystackText = [...haystack].join("\n");
-  const quoted = evidence
+  const lines = [file.patch ?? "", file.fileContent ?? ""]
+    .flatMap((text) => text.split("\n"))
+    .map(normalizeCodeLine)
+    .filter((line) => line.length > 0);
+  // Joined with spaces so a quote that merges two source lines still matches.
+  const haystack = ` ${lines.join(" ")} `;
+  const fragments = evidence
     .replace(/^```[\w-]*\n?|```$/g, "")
     .split("\n")
     .map(normalizeCodeLine)
-    .filter((line) => line.length > 0 && line !== "...");
+    .filter((line) => line.length > 0 && !ELISION_LINE.test(line))
+    .flatMap((line) => line.split(INLINE_ELISION))
+    .map((fragment) => fragment.trim())
+    .filter((fragment) => fragment.length >= MIN_FRAGMENT_LENGTH);
   return (
-    quoted.length > 0 &&
-    quoted.every((line) => haystack.has(line) || haystackText.includes(line))
+    fragments.length > 0 &&
+    fragments.every((fragment) => haystack.includes(fragment))
   );
 }
 

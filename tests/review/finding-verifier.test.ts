@@ -83,8 +83,38 @@ describe("decideVerification", () => {
     ).toBe("uncertain");
   });
 
-  it("treats unparseable replies as uncertain", () => {
-    expect(decideVerification({ nope: true }, file).verdict).toBe("uncertain");
+  it("treats unparseable replies as unverified, not as evidence", () => {
+    expect(decideVerification({ nope: true }, file).verdict).toBe("unverified");
+  });
+
+  it("accepts multi-line quotes with a line number on every line", () => {
+    expect(
+      decideVerification(
+        {
+          verdict: "confirmed",
+          quotedLines: ["2: if (!user) return;\n3: deleteUser(user.id);"],
+          failureScenario: "x",
+          refutationReason: "",
+          confidence: "high",
+        },
+        file,
+      ).verdict,
+    ).toBe("confirmed");
+  });
+
+  it("does not trust a refutation that quotes code that is not there", () => {
+    expect(
+      decideVerification(
+        {
+          verdict: "refuted",
+          quotedLines: ["validateUser(user);"],
+          failureScenario: "",
+          refutationReason: "the caller validates the user",
+          confidence: "high",
+        },
+        file,
+      ).verdict,
+    ).toBe("uncertain");
   });
 });
 
@@ -193,5 +223,66 @@ describe("ReviewEngine with the verifier", () => {
         ["Maybe bug", "unconfirmed_below_floor"],
       ]),
     );
+  });
+});
+
+describe("ReviewEngine verifier outcomes", () => {
+  const finding = (title: string, severity: string) => ({
+    path: "src/users.ts",
+    line: 3,
+    findingType: "bug",
+    severity,
+    category: "security",
+    title,
+    evidence: "deleteUser(user.id);",
+    failureScenario: "x",
+    body: `${title}.`,
+    fixPrompt: "In src/users.ts around line 3, fix.",
+    suggestedChange: null,
+  });
+
+  it("keeps unverified findings at their severity and demotes refuted severe ones", async () => {
+    const model: ReviewModel = {
+      async generateStructuredReview(input) {
+        if (input.jsonSchema?.name === "nitpickr_verification") {
+          if (input.user.includes("Title: Verifier fails")) {
+            throw new Error("timeout");
+          }
+          return {
+            verdict: "refuted",
+            quotedLines: ["if (!user) return;"],
+            failureScenario: "",
+            refutationReason: "guarded on line 2",
+            confidence: "high",
+          };
+        }
+        return {
+          summary: "s",
+          findings: [
+            finding("Verifier fails", "medium"),
+            finding("Refuted critical", "critical"),
+          ],
+          priorThreadVerdicts: [],
+        };
+      },
+    };
+
+    const result = await new ReviewEngine(model, {
+      verifier: { maxFindings: 6 },
+    }).reviewWithDiagnostics({
+      changeRequest: { title: "t", number: 1 },
+      files: [{ ...file, additions: 2, deletions: 0 }],
+      instructionText: "",
+      memory: [],
+      commentBudget: 5,
+      severityFloor: "medium",
+    });
+
+    expect(
+      result.result.findings.map((entry) => [entry.title, entry.severity]),
+    ).toEqual([
+      ["Refuted critical", "high"],
+      ["Verifier fails", "medium"],
+    ]);
   });
 });

@@ -5,7 +5,10 @@ import {
   toResponseSchema,
 } from "../shared/chat-completion-client.js";
 import { evidenceAppearsInCode, type Severity } from "./evidence-gate.js";
-import { stripInvisible, UNTRUSTED_CONTENT_RULE } from "./untrusted-content.js";
+import {
+  revealInvisible,
+  UNTRUSTED_CONTENT_RULE,
+} from "./untrusted-content.js";
 
 /**
  * Adversarial verification of one finding. A fresh call that sees the claim,
@@ -16,7 +19,15 @@ import { stripInvisible, UNTRUSTED_CONTENT_RULE } from "./untrusted-content.js";
  * false alarms (arXiv 2603.00539).
  */
 
-export type VerifierVerdict = "confirmed" | "refuted" | "uncertain";
+/**
+ * `unverified` is not a model verdict: the check was skipped (cap) or failed
+ * (timeout, model error), so the finding keeps its original severity.
+ */
+export type VerifierVerdict =
+  | "confirmed"
+  | "refuted"
+  | "uncertain"
+  | "unverified";
 
 const verifierWireSchema = z.strictObject({
   verdict: z.enum(["confirmed", "refuted", "uncertain"]),
@@ -88,7 +99,7 @@ function fileExcerpt(file: VerifierFile, line: number): string | null {
   if (content === undefined || content === null) {
     return null;
   }
-  const lines = stripInvisible(content).split("\n");
+  const lines = revealInvisible(content).split("\n");
   const numbered = (start: number, end: number) =>
     lines
       .slice(start, end)
@@ -115,7 +126,7 @@ export function buildVerifierPrompt(
       `Claim: ${finding.body}`,
       "",
       "Patch:",
-      file.patch === null ? "Patch unavailable." : stripInvisible(file.patch),
+      file.patch === null ? "Patch unavailable." : revealInvisible(file.patch),
       "",
       excerpt === null
         ? "File at HEAD: unavailable."
@@ -135,20 +146,28 @@ export function decideVerification(
 ): VerificationOutcome {
   const parsed = verifierResponseSchema.safeParse(reply);
   if (!parsed.success) {
-    return { verdict: "uncertain", reason: "unparseable verifier reply" };
+    return { verdict: "unverified", reason: "unparseable verifier reply" };
   }
   const response = parsed.data;
   const quotes = response.quotedLines.filter((line) => line.trim().length > 0);
+  // evidenceAppearsInCode strips the "12: " prefixes the verifier is shown,
+  // on every line of a multi-line quote.
   const quotesMatch =
     quotes.length > 0 &&
-    quotes.every((line) =>
-      evidenceAppearsInCode(line.replace(/^\s*\d+:\s?/, ""), file),
-    );
+    quotes.every((line) => evidenceAppearsInCode(line, file));
 
   if (response.verdict === "refuted") {
-    return response.refutationReason.trim().length > 0
+    // A refutation deletes a finding, so it must be as grounded as a
+    // confirmation: a reason and quotes that exist in the code.
+    if (response.refutationReason.trim().length === 0) {
+      return { verdict: "uncertain", reason: "refuted without a reason" };
+    }
+    return quotesMatch
       ? { verdict: "refuted", reason: response.refutationReason.trim() }
-      : { verdict: "uncertain", reason: "refuted without a reason" };
+      : {
+          verdict: "uncertain",
+          reason: `refutation quoted code not found: ${response.refutationReason.trim()}`,
+        };
   }
   if (response.verdict === "confirmed") {
     return quotesMatch
@@ -177,7 +196,7 @@ export async function verifyFinding(
     return decideVerification(reply, file);
   } catch (error) {
     return {
-      verdict: "uncertain",
+      verdict: "unverified",
       reason: `verifier error: ${error instanceof Error ? error.message : String(error)}`,
     };
   }

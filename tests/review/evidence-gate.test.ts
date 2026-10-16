@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { gateAndRankFindings } from "../../src/review/evidence-gate.js";
+import {
+  evidenceAppearsInCode,
+  gateAndRankFindings,
+} from "../../src/review/evidence-gate.js";
 
 describe("gateAndRankFindings", () => {
   it("suppresses findings when matching suppressing feedback exists", () => {
@@ -115,5 +118,33 @@ describe("gateAndRankFindings", () => {
 
     expect(result.acceptedFindings).toHaveLength(1);
     expect(result.rejectedFindings).toEqual([]);
+  });
+});
+
+describe("evidenceAppearsInCode", () => {
+  const file = {
+    path: "src/a.ts",
+    patch: "@@ -1,3 +1,4 @@\n if (x) {\n+  return x.y;\n }\n+run(\u202Eevil);",
+    fileContent: "if (x) {\n  return x.y;\n}\nrun(\u202Eevil);\n",
+  };
+
+  it.each([
+    ["exact line", "return x.y;"],
+    ["diff marker and line number", "+  return x.y;"],
+    ["numbered lines", "1: if (x) {\n2:   return x.y;"],
+    ["elision line", "if (x) {\n// ...\n}"],
+    ["unicode elision", "if (x) {\n…\n}"],
+    ["inline elision", "if (x) { ... return x.y;"],
+    ["two lines joined", "if (x) { return x.y;"],
+    ["revealed bidi character", "run(<U+202E>evil);"],
+  ])("matches %s", (_label, quote) => {
+    expect(evidenceAppearsInCode(quote, file)).toBe(true);
+  });
+
+  it.each([
+    ["invented code", "db.drop();"],
+    ["only an elision", "..."],
+  ])("rejects %s", (_label, quote) => {
+    expect(evidenceAppearsInCode(quote, file)).toBe(false);
   });
 });

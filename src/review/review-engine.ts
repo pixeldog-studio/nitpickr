@@ -934,10 +934,24 @@ export class ReviewEngine {
       const outcome =
         file !== undefined && calls < verifier.maxFindings
           ? await verifyFinding(this.#model, finding, file)
-          : { verdict: "uncertain" as const, reason: "not verified" };
+          : { verdict: "unverified" as const, reason: "not verified (cap)" };
       calls += file === undefined ? 0 : 1;
-      if (outcome.verdict === "confirmed") {
+      if (outcome.verdict === "confirmed" || outcome.verdict === "unverified") {
+        // Unverified (cap reached or the verifier failed) is not evidence
+        // against the finding: publish it as the reviewer rated it.
         kept.push(finding);
+        continue;
+      }
+      if (
+        outcome.verdict === "refuted" &&
+        (finding.severity === "high" || finding.severity === "critical")
+      ) {
+        // A small model can talk itself out of a real serious bug; demote
+        // instead of deleting so it still gets seen.
+        kept.push({
+          ...finding,
+          severity: downgradeSeverity(finding.severity),
+        });
         continue;
       }
       if (outcome.verdict === "refuted") {
