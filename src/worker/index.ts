@@ -110,6 +110,7 @@ async function main(): Promise<void> {
       reviewPlanner: runtime.reviewPlanner,
       reviewLifecycle: runtime.reviewLifecycle,
       reviewEngine: operationalRuntime.reviewEngine,
+      conversationResponder: operationalRuntime.conversationResponder,
       publisher: operationalRuntime.publisher,
       statusPublisher: operationalRuntime.reviewStatusPublisher,
     });

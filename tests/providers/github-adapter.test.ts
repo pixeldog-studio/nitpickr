@@ -530,7 +530,7 @@ describe("GitHubAdapter", () => {
         pullNumber: 42,
         command: "learn",
         source: expect.objectContaining({
-          argumentText: "prefer explicit guards in api handlers",
+          argumentText: "prefer explicit guards in API handlers",
         }),
       }),
     );
@@ -639,7 +639,7 @@ describe("GitHubAdapter", () => {
     );
   });
 
-  it("ignores unsupported comment commands", () => {
+  it("turns free-form mentions into questions", () => {
     const adapter = new GitHubAdapter({
       apiClient: new FakeGitHubApiClient(),
       appConfig: {
@@ -681,12 +681,43 @@ describe("GitHubAdapter", () => {
 
     expect(event).toEqual(
       expect.objectContaining({
-        kind: "ignored",
-        reason: expect.stringContaining(
-          "Comment did not contain a recognized nitpickr command.",
-        ),
+        kind: "interaction_requested",
+        command: "ask",
+        source: expect.objectContaining({ argumentText: "ship it" }),
       }),
     );
+  });
+
+  it("ignores comments written by the bot itself", () => {
+    const adapter = new GitHubAdapter({
+      apiClient: new FakeGitHubApiClient(),
+      appConfig: {
+        appId: 1,
+        privateKey: "key",
+        webhookSecret: "secret",
+        webhookUrl: "https://example.com/webhooks/github",
+        botLogins: ["nitpickrai"],
+      },
+    });
+    const event = adapter.normalizeWebhookEvent("pull_request_review_comment", {
+      action: "created",
+      installation: { id: 123456 },
+      repository: {
+        id: 99,
+        name: "nitpickr",
+        owner: { login: "rubenspessoa" },
+        default_branch: "main",
+      },
+      pull_request: { number: 42 },
+      comment: {
+        id: 7001,
+        body: "Fair point. I re-checked it and the finding was wrong.",
+        in_reply_to_id: 7000,
+        user: { login: "nitpickrai[bot]" },
+      },
+    });
+
+    expect(event).toMatchObject({ kind: "ignored" });
   });
 
   it("reacts to issue comments that mention the bot", async () => {

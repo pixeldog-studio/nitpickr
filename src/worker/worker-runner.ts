@@ -15,6 +15,10 @@ import type {
 import type { ReviewPublisher } from "../publisher/review-publisher.js";
 import type { ReviewStatusPublisher } from "../publisher/review-status-publisher.js";
 import type { QueueJob, QueueScheduler } from "../queue/queue-scheduler.js";
+import type {
+  ConversationResponder,
+  ConversationThread,
+} from "../review/conversation-responder.js";
 import { fingerprintFinding } from "../review/finding-fingerprint.js";
 import type {
   PriorThread,
@@ -31,6 +35,7 @@ import type { ReviewPlanner } from "../review/review-planner.js";
 import {
   parseInlineCommentContext,
   type ReviewerChatCommand,
+  type ReviewerChatReply,
   ReviewerChatService,
 } from "../review/reviewer-chat-service.js";
 import {
@@ -915,6 +920,8 @@ export interface WorkerRunnerDependencies {
   >;
   reviewPlanner: Pick<ReviewPlanner, "plan">;
   reviewerChatService?: Pick<ReviewerChatService, "respond">;
+  /** Model-backed answers for ask/why/teach and verifier-backed reconsider. */
+  conversationResponder?: Pick<ConversationResponder, "answer" | "reconsider">;
   reviewLifecycle: Pick<
     ReviewLifecycleService,
     "startReview" | "completeReview" | "failReview"
@@ -946,6 +953,10 @@ export class WorkerRunner {
   readonly #feedbackService: WorkerRunnerDependencies["feedbackService"];
   readonly #reviewPlanner: WorkerRunnerDependencies["reviewPlanner"];
   readonly #reviewerChatService: Pick<ReviewerChatService, "respond">;
+  readonly #conversationResponder: Pick<
+    ConversationResponder,
+    "answer" | "reconsider"
+  > | null;
   readonly #reviewLifecycle: WorkerRunnerDependencies["reviewLifecycle"];
   readonly #reviewEngine: WorkerRunnerDependencies["reviewEngine"];
   readonly #publisher: WorkerRunnerDependencies["publisher"];
@@ -970,6 +981,7 @@ export class WorkerRunner {
     this.#reviewPlanner = input.reviewPlanner;
     this.#reviewerChatService =
       input.reviewerChatService ?? new ReviewerChatService();
+    this.#conversationResponder = input.conversationResponder ?? null;
     this.#reviewLifecycle = input.reviewLifecycle;
     this.#reviewEngine = input.reviewEngine;
     this.#publisher = input.publisher;
@@ -1858,13 +1870,40 @@ export class WorkerRunner {
             };
           })();
 
-    const reply = await this.#reviewerChatService.respond({
-      command: payload.command,
-      actorLogin: payload.actorLogin,
-      argumentText: payload.source.argumentText,
-      latestReview,
-      thread: threadContext,
-    });
+    if (
+      payload.source.kind === "review_comment" &&
+      referencedThread === null &&
+      payload.command === "ask"
+    ) {
+      // Replies in threads nitpickr did not start are people talking to
+      // each other.
+      logger.info("Ignoring reply in a thread nitpickr did not start.", {
+        jobId: job.id,
+        replyTargetCommentId: payload.replyTargetCommentId,
+      });
+      return;
+    }
+
+    const modelReply =
+      this.#conversationResponder === null
+        ? null
+        : await this.#respondWithModel({
+            job,
+            payload,
+            responder: this.#conversationResponder,
+            thread: threadContext,
+            threadId: referencedThread?.threadId ?? null,
+            logger,
+          });
+    const reply =
+      modelReply ??
+      (await this.#reviewerChatService.respond({
+        command: payload.command,
+        actorLogin: payload.actorLogin,
+        argumentText: payload.source.argumentText,
+        latestReview,
+        thread: threadContext,
+      }));
 
     if (reply.memoryDiscussions.length > 0) {
       await this.#memoryService.ingestDiscussion({
@@ -1910,6 +1949,148 @@ export class WorkerRunner {
       command: payload.command,
       sourceKind: payload.source.kind,
     });
+  }
+
+  /**
+   * Answer ask/why/teach with the model, grounded in the PR, and re-verify a
+   * finding for reconsider. Returns null for commands the template service
+   * handles (status, learn, fix, help) or when the model call fails.
+   */
+  async #respondWithModel(input: {
+    job: QueueJob;
+    payload: ReturnType<typeof parseInteractionJobPayload>;
+    responder: Pick<ConversationResponder, "answer" | "reconsider">;
+    thread: (ConversationThread & { fingerprint: string }) | null;
+    threadId: string | null;
+    logger: Logger;
+  }): Promise<ReviewerChatReply | null> {
+    const { job, payload, responder, thread, logger } = input;
+    const command = payload.command;
+    if (
+      command !== "ask" &&
+      command !== "why" &&
+      command !== "teach" &&
+      command !== "reconsider"
+    ) {
+      return null;
+    }
+    if (command === "reconsider" && thread === null) {
+      return null;
+    }
+
+    try {
+      const context = await this.#githubAdapter.fetchChangeRequestContext({
+        installationId: payload.installationId,
+        repository: payload.repository,
+        pullNumber: payload.pullNumber,
+        tenantId: job.tenantId,
+        repositoryId: job.repositoryId,
+      });
+      const threadFileContent =
+        thread && this.#githubAdapter.getFileContent
+          ? await this.#githubAdapter.getFileContent({
+              installationId: payload.installationId,
+              repository: payload.repository,
+              path: thread.path,
+              ref: context.changeRequest.headSha,
+            })
+          : null;
+
+      if (command === "reconsider" && thread !== null) {
+        const result = await responder.reconsider(thread, {
+          path: thread.path,
+          patch:
+            context.files.find((file) => file.path === thread.path)?.patch ??
+            null,
+          fileContent: threadFileContent,
+        });
+        if (
+          result.resolve &&
+          input.threadId &&
+          this.#githubAdapter.resolveReviewThread
+        ) {
+          await this.#githubAdapter.resolveReviewThread({
+            installationId: payload.installationId,
+            threadId: input.threadId,
+          });
+          await this.#reviewLifecycle.markPublishedCommentsResolved?.([
+            input.threadId,
+          ]);
+        }
+        logger.info("Reconsidered finding with the verifier.", {
+          jobId: job.id,
+          verdict: result.verdict,
+          resolved: result.resolve,
+        });
+        return {
+          body: result.body,
+          feedbackEvents: result.resolve
+            ? [
+                {
+                  fingerprint: thread.fingerprint,
+                  path: thread.path,
+                  category: categoryFromFingerprint(thread.fingerprint),
+                  kind: "ignored",
+                },
+              ]
+            : [],
+          memoryDiscussions: [],
+        };
+      }
+
+      const instructions = await this.#instructionBundleLoader
+        .loadForReview(context)
+        .then((bundle) => bundle.combinedText)
+        .catch(() => "");
+      const question =
+        payload.source.argumentText?.trim() ||
+        (command === "ask" ? payload.source.body : "");
+      const memories = this.#memoryService.selectMemoriesForReview
+        ? await this.#memoryService.selectMemoriesForReview({
+            tenantId: job.tenantId,
+            repositoryId: job.repositoryId,
+            reviewedPaths: thread
+              ? [thread.path]
+              : context.files.map((file) => file.path),
+            reviewContext: `${context.changeRequest.title}\n${question}`.slice(
+              0,
+              2_000,
+            ),
+            charBudget: 1_500,
+          })
+        : [];
+      const answer = await responder.answer({
+        // reconsider returned above, so only conversational commands remain.
+        framing: command as "ask" | "why" | "teach",
+        question,
+        askerLogin: payload.actorLogin,
+        pullRequest: {
+          title: context.changeRequest.title,
+          number: context.changeRequest.number,
+        },
+        thread,
+        threadFile:
+          thread && threadFileContent
+            ? { path: thread.path, content: threadFileContent }
+            : null,
+        changedFiles: context.files.map((file) => ({
+          path: file.path,
+          patch: file.patch,
+        })),
+        instructions,
+        memories: memories.map((entry) =>
+          entry.path ? `${entry.path}: ${entry.summary}` : entry.summary,
+        ),
+      });
+      return { body: answer, feedbackEvents: [], memoryDiscussions: [] };
+    } catch (error) {
+      logger.warn("Model-backed reply failed; falling back to templates.", {
+        jobId: job.id,
+        command,
+        error: toErrorMessage(error),
+      });
+      return null;
+    }
   }
 
   async #processMemoryJob(job: QueueJob, jobLogger: Logger): Promise<void> {

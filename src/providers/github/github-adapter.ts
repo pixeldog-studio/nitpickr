@@ -278,6 +278,7 @@ const interactionCommands = [
   "fix",
   "learn",
   "status",
+  "help",
 ] as const;
 
 const supportedCommandSuffixes = [
@@ -477,6 +478,47 @@ function parseInteractionCommand(
   };
 }
 
+/** Text after the bot mention, original case preserved. */
+function extractMentionText(body: string, botLogins: string[]): string | null {
+  for (const botLogin of botLogins) {
+    const escaped = botLogin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = new RegExp(
+      `(?:^|\\s)@${escaped}\\b[\\s:,-]*([\\s\\S]+)`,
+      "i",
+    ).exec(body.trim());
+    if (match?.[1]?.trim()) {
+      return match[1].trim();
+    }
+  }
+  return null;
+}
+
+/** Comments written by nitpickr (or any bot) never trigger a reply. */
+function isBotAuthor(login: string, botLogins: string[]): boolean {
+  const normalized = login.toLowerCase().replace(/\[bot\]$/, "");
+  return (
+    login.toLowerCase().endsWith("[bot]") ||
+    botLogins.some((botLogin) => botLogin.toLowerCase() === normalized)
+  );
+}
+
+/**
+ * Commands lowercase their text for matching; `learn` and `ask` need the
+ * author's original wording back.
+ */
+function originalArgumentText(
+  body: string,
+  botLogins: string[],
+  command: string,
+): string | null {
+  const text = extractMentionText(body, botLogins) ?? body.trim();
+  const escaped = command.replace(/_/g, "[\\s_-]+");
+  const stripped = text
+    .replace(new RegExp(`^/?${escaped}\\b[\\s:,-]*`, "i"), "")
+    .trim();
+  return stripped.length > 0 ? stripped : null;
+}
+
 function containsBotMention(body: string, botLogins: string[]): boolean {
   const normalized = body.trim().toLowerCase().replace(/\s+/g, " ");
 
@@ -610,6 +652,9 @@ export class GitHubAdapter {
         };
       }
 
+      if (isBotAuthor(parsed.comment.user.login, this.#botLogins)) {
+        return { kind: "ignored", reason: "Comment was written by a bot." };
+      }
       const interaction = parseInteractionCommand(
         parsed.comment.body,
         this.#botLogins,
@@ -617,7 +662,12 @@ export class GitHubAdapter {
           requireMention: true,
         },
       );
-      if (interaction) {
+      const question =
+        interaction === null
+          ? extractMentionText(parsed.comment.body, this.#botLogins)
+          : null;
+      if (interaction || question) {
+        const command = interaction?.command ?? "ask";
         return {
           kind: "interaction_requested",
           installationId: String(parsed.installation.id),
@@ -627,12 +677,18 @@ export class GitHubAdapter {
           ),
           pullNumber: parsed.issue.number,
           actorLogin: parsed.comment.user.login,
-          command: interaction.command,
+          command,
           source: {
             kind: "issue_comment",
             commentId: parsed.comment.id,
             body: parsed.comment.body,
-            argumentText: interaction.argumentText,
+            argumentText:
+              question ??
+              originalArgumentText(
+                parsed.comment.body,
+                this.#botLogins,
+                command,
+              ),
           },
         };
       }
@@ -661,6 +717,12 @@ export class GitHubAdapter {
         };
       }
 
+      if (isBotAuthor(parsed.comment.user.login, this.#botLogins)) {
+        return { kind: "ignored", reason: "Comment was written by a bot." };
+      }
+      // A reply in a thread is addressed to the thread's author. Known
+      // commands run as before; anything else is a question or remark the
+      // worker answers when the thread is nitpickr's.
       const interaction = parseInteractionCommand(
         parsed.comment.body,
         this.#botLogins,
@@ -668,12 +730,7 @@ export class GitHubAdapter {
           requireMention: false,
         },
       );
-      if (!interaction) {
-        return {
-          kind: "ignored",
-          reason: `Comment did not contain a recognized nitpickr command. Supported commands: ${this.#supportedCommandExamples().join(", ")}.`,
-        };
-      }
+      const command = interaction?.command ?? "ask";
 
       return {
         kind: "interaction_requested",
@@ -684,13 +741,21 @@ export class GitHubAdapter {
         ),
         pullNumber: parsed.pull_request.number,
         actorLogin: parsed.comment.user.login,
-        command: interaction.command,
+        command,
         replyTargetCommentId: parsed.comment.in_reply_to_id,
         source: {
           kind: "review_comment",
           commentId: parsed.comment.id,
           body: parsed.comment.body,
-          argumentText: interaction.argumentText,
+          argumentText:
+            interaction === null
+              ? (extractMentionText(parsed.comment.body, this.#botLogins) ??
+                parsed.comment.body.trim())
+              : originalArgumentText(
+                  parsed.comment.body,
+                  this.#botLogins,
+                  command,
+                ),
           path: parsed.comment.path ?? null,
           line: parsed.comment.line ?? null,
         },
