@@ -11,13 +11,15 @@ Baseline commit: `e7aecec`. One PR per milestone; never merge; nitpickr reviews 
 - [x] Explicit prior-thread verdicts; resolve only fixed/obsolete
 - [x] "No further comments" end state
 - [x] Gate findings that repeat a still-open thread (seen live: model re-raised an open thread)
-- [ ] lint, typecheck, tests; PR opened; nitpickr comments triaged + scorecard
+- [x] lint, typecheck, tests; PR opened; nitpickr comments triaged + scorecard (#14, merged fbbd447)
+- [x] Independent review found 4 bugs nitpickr missed (outdated threads, full review skipped, cancel race, broad duplicate filter); fixed before merge
 
 ## Milestone 2 — eval suite + baseline
-- [ ] Pipeline-level live eval (gate, floor, budget, multi-round)
-- [ ] >= 30 cases from active repos (Swift, TS/Node/Astro, Python, Postgres), clean + multi-round + injection
-- [ ] Metrics: precision (medium+), recall, nit count, median latency
-- [ ] Baseline on `e7aecec`, comparison on branch
+- [x] Pipeline-level live eval (gate, floor, budget, multi-round, verdicts)
+- [x] 47 cases: 22 synthetic (Swift, TS, SQL, Python planted/clean, injection, multi-round) + 25 captured from ai-automation, user-management, ai-plant-scanner(-web), rouleur-ios, nitpickr
+- [x] Metrics: precision (medium+), recall, nit count, clean-case FPs, verdict accuracy, median latency, per stack/kind
+- [ ] Baseline on `e7aecec` (full suite) and comparison on branch
+- Gap: no captured real SQL/RLS bug within the size limit; SQL coverage is synthetic only
 
 ## Milestone 3 — verifier + lenses + lint filter + untrusted content
 ## Milestone 4 — conversation
@@ -29,7 +31,9 @@ Baseline commit: `e7aecec`. One PR per milestone; never merge; nitpickr reviews 
 | PR | comments | valid | nits | wrong | missed | notes |
 |---|---|---|---|---|---|---|
 | #13 (pre-work) | 15 | ? | most | 1 contradiction pair | ? | baseline sample |
-| #14 r1 (main build) | 9 | 0 | 5 | 4 (all ⚠️ medium) | 0 known | wrong ones misread code (one inverted a filter); trimmer cut a body at `'a'.`; 3-paragraph summary from chunk joins |
+| #14 r1 (old build) | 9 | 0 | 5 | 4 (all ⚠️ medium) | 0 known | wrong ones misread code (one inverted a filter); trimmer cut a body at `'a'.`; 3-paragraph summary from chunk joins |
+| #14 r2 (old build) | 1 | 0 | 1 | 0 | — | refactor nit |
+| #14 r3 (old build) | 1 | 0 | 1 | 1 (suggestion inapplicable) | 4 (found by independent review) | body cut at `expect(.` again |
 
 # Website Metadata + SEO Refresh
 
