@@ -186,15 +186,38 @@ function normalizeString(value: unknown): string | undefined {
   return trimmed.length === 0 ? undefined : trimmed;
 }
 
-function maybeTrimSentenceCount(value: string, maxSentences: number): string {
-  const sentences = value
-    .match(/[^.!?]+[.!?]?/g)
-    ?.map((part) => part.trim()) ?? [value];
-  const trimmed = sentences
-    .filter((part) => part.length > 0)
-    .slice(0, maxSentences);
-
-  return trimmed.join(" ").trim();
+/**
+ * Keep the first `maxSentences` sentences. A sentence ends at `.`, `!` or `?`
+ * followed by whitespace or the end of the text, outside inline code, so
+ * `'a'.repeat(40)` or `v1.2` never cut a body mid-expression.
+ */
+export function maybeTrimSentenceCount(
+  value: string,
+  maxSentences: number,
+): string {
+  let inCode = false;
+  let sentences = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (character === "`") {
+      inCode = !inCode;
+      continue;
+    }
+    if (
+      inCode ||
+      (character !== "." && character !== "!" && character !== "?")
+    ) {
+      continue;
+    }
+    const next = value[index + 1];
+    if (next === undefined || /\s/.test(next)) {
+      sentences += 1;
+      if (sentences === maxSentences) {
+        return value.slice(0, index + 1).trim();
+      }
+    }
+  }
+  return value.trim();
 }
 
 function withScopedFixPrompt(

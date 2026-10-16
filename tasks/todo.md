@@ -29,6 +29,7 @@ Baseline commit: `e7aecec`. One PR per milestone; never merge; nitpickr reviews 
 | PR | comments | valid | nits | wrong | missed | notes |
 |---|---|---|---|---|---|---|
 | #13 (pre-work) | 15 | ? | most | 1 contradiction pair | ? | baseline sample |
+| #14 r1 (main build) | 9 | 0 | 5 | 4 (all ⚠️ medium) | 0 known | wrong ones misread code (one inverted a filter); trimmer cut a body at `'a'.`; 3-paragraph summary from chunk joins |
 
 # Website Metadata + SEO Refresh
 
