@@ -9,6 +9,7 @@ import {
   loadLiveEvaluationFixtures,
   rescoreReport,
 } from "../eval/live-review-evaluator.js";
+import { LocalMemoryEmbedder } from "../memory/local-memory-embedder.js";
 import { createPostgresClient } from "../runtime/postgres.js";
 import { flagBoolean, flagInteger, flagString, parseArgs } from "./args.js";
 import { DoctorCommand } from "./doctor-command.js";
@@ -89,6 +90,15 @@ async function main(): Promise<void> {
               ? null
               : (reasoningFlag as ReasoningEffort),
         timeoutMs,
+        ...(bootstrap.models.embeddingModel === null
+          ? {}
+          : {
+              embedder: new LocalMemoryEmbedder({
+                model: bootstrap.models.embeddingModel,
+                expectedDimensions: bootstrap.models.embeddingDimensions,
+                cacheDir: bootstrap.models.embeddingCacheDir,
+              }),
+            }),
         engineOptions: {
           maxConcurrentModelRequests: bootstrap.models.maxConcurrentRequests,
           maxTotalCharactersPerChunk: bootstrap.models.reviewChunkMaxTotalChars,

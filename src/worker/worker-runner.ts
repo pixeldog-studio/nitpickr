@@ -6,6 +6,10 @@ import type { InstructionBundle } from "../instructions/instruction-loader.js";
 import { withTiming } from "../logging/correlation.js";
 import { type Logger, noopLogger } from "../logging/logger.js";
 import type { DiscussionAcknowledgmentStore } from "../memory/discussion-acknowledgment-store.js";
+import {
+  DISMISSAL_SIMILARITY,
+  dismissalThreshold,
+} from "../memory/dismissal-policy.js";
 import type { MemoryEntry, MemoryService } from "../memory/memory-service.js";
 import { captureError } from "../observability/sentry.js";
 import type {
@@ -353,15 +357,6 @@ function formatAcknowledgmentReply(input: {
 }
 
 const MAX_FILE_CONTENT_BYTES = 200_000;
-/**
- * Cosine similarity (nomic-embed-text, finding text vs. stored finding text)
- * at which a new finding repeats a dismissed one. Calibrated on real pairs:
- * repeats scored 0.83-0.90, unrelated findings at most 0.69, and a related
- * but more serious finding 0.80. High and critical findings need a near
- * duplicate so an old nit cannot hide a serious new bug.
- */
-const DISMISSAL_SIMILARITY = 0.82;
-const DISMISSAL_SIMILARITY_SEVERE = 0.92;
 const FILE_CONTENT_FETCH_CONCURRENCY = 6;
 
 async function fetchPrimaryFileContents(input: {
@@ -1047,6 +1042,8 @@ export interface LearnableThread {
   fingerprint: string;
   isResolved: boolean;
   isOutdated?: boolean;
+  /** Commit the comment was made on; needed to tell whether code changed. */
+  originalCommitSha?: string;
   body: string;
   reactionSummary: { negativeCount: number };
 }
@@ -1062,7 +1059,15 @@ export async function learnFromThreads(input: {
   job: Pick<QueueJob, "id" | "tenantId" | "repositoryId">;
   threads: LearnableThread[];
   logger: Logger;
-  memoryService: Partial<Pick<MemoryService, "recordDismissedFinding">>;
+  memoryService: Partial<
+    Pick<MemoryService, "recordDismissedFinding" | "findSimilarDismissals">
+  >;
+  /**
+   * Whether `path` changed between `sinceSha` and the PR head. A thread a
+   * human resolved after changing the file was probably fixed, not dismissed.
+   * Without it (or without the thread's commit) nothing is learned.
+   */
+  fileChangedSince?: (path: string, sinceSha: string) => Promise<boolean>;
   feedbackService?: Pick<ReviewFeedbackService, "recordOutcome">;
   reviewLifecycle: {
     markPublishedCommentsResolved?: (ids: string[]) => Promise<number>;
@@ -1080,7 +1085,15 @@ export async function learnFromThreads(input: {
           (await input.reviewLifecycle.markPublishedCommentsResolved?.([
             thread.threadId,
           ])) ?? 0;
-        if (newlySettled > 0) {
+        const unchanged =
+          newlySettled > 0 &&
+          thread.originalCommitSha !== undefined &&
+          input.fileChangedSince !== undefined &&
+          !(await input.fileChangedSince(
+            thread.path,
+            thread.originalCommitSha,
+          ));
+        if (unchanged) {
           await input.feedbackService?.recordOutcome({
             tenantId: job.tenantId,
             repositoryId: job.repositoryId,
@@ -1108,7 +1121,19 @@ export async function learnFromThreads(input: {
           continue;
         }
       }
-      if (thread.reactionSummary.negativeCount > 0) {
+      // Once per finding: a thumbs-down stays on the thread, so without this
+      // every review would re-record it and creep its confidence up.
+      const alreadyRemembered =
+        thread.reactionSummary.negativeCount > 0 &&
+        (
+          (await input.memoryService.findSimilarDismissals?.({
+            tenantId: job.tenantId,
+            repositoryId: job.repositoryId,
+            text: `${parsed.title}. ${parsed.body}`,
+            minSimilarity: 0.97,
+          })) ?? []
+        ).length > 0;
+      if (thread.reactionSummary.negativeCount > 0 && !alreadyRemembered) {
         await record?.({
           tenantId: job.tenantId,
           repositoryId: job.repositoryId,
@@ -1134,6 +1159,8 @@ export function memoryPromptText(entry: Pick<MemoryEntry, "kind" | "summary">) {
     ? `Dismissed before, do not raise again: ${entry.summary}`
     : entry.summary;
 }
+
+export { dismissalThreshold };
 
 export class WorkerRunner {
   readonly #logger: Logger;
@@ -1776,10 +1803,26 @@ export class WorkerRunner {
             pullNumber: payload.pullNumber,
           })
         : [];
+      const compareRange = this.#githubAdapter.comparePullRequestRange?.bind(
+        this.#githubAdapter,
+      );
       await this.#learnFromThreads({
         job,
         threads: existingNitpickrThreads,
         logger,
+        ...(compareRange
+          ? {
+              fileChangedSince: async (path: string, sinceSha: string) =>
+                (
+                  await compareRange({
+                    installationId: payload.installationId,
+                    repository: payload.repository,
+                    baseSha: sinceSha,
+                    headSha: context.changeRequest.headSha,
+                  })
+                ).some((file) => file.path === path),
+            }
+          : {}),
       });
       if (this.#feedbackService && existingNitpickrThreads.length > 0) {
         await this.#feedbackService.syncCommentReactions({
@@ -2580,9 +2623,9 @@ export class WorkerRunner {
         .loadForReview(context)
         .then((bundle) => bundle.combinedText)
         .catch(() => "");
-      const question =
-        payload.source.argumentText?.trim() ||
-        (command === "ask" ? payload.source.body : "");
+      // The adapter strips the mention and quoted text; never fall back to
+      // the raw body, which would feed "@bot ..." into the prompt and memory.
+      const question = payload.source.argumentText?.trim() ?? "";
       const memories = this.#memoryService.selectMemoriesForReview
         ? await this.#memoryService.selectMemoriesForReview({
             tenantId: job.tenantId,
@@ -2628,6 +2671,7 @@ export class WorkerRunner {
               .ingestDiscussion({
                 tenantId: job.tenantId,
                 repositoryId: job.repositoryId,
+                classifierOnly: true,
                 discussions: [
                   {
                     authorLogin: payload.actorLogin,
@@ -2673,6 +2717,7 @@ export class WorkerRunner {
     job: QueueJob;
     threads: LearnableThread[];
     logger: Logger;
+    fileChangedSince?: (path: string, sinceSha: string) => Promise<boolean>;
   }): Promise<void> {
     await learnFromThreads({
       ...input,
@@ -2693,14 +2738,15 @@ export class WorkerRunner {
         tenantId: job.tenantId,
         repositoryId: job.repositoryId,
         text: `${finding.title}. ${finding.body}`,
-        minSimilarity:
-          finding.severity === "high" || finding.severity === "critical"
-            ? DISMISSAL_SIMILARITY_SEVERE
-            : DISMISSAL_SIMILARITY,
+        minSimilarity: DISMISSAL_SIMILARITY,
       })) ?? [];
-    const best = matches[0];
-    return best
-      ? `${best.entry.summary} (similarity ${best.similarity.toFixed(2)})`
+    const match = matches.find(
+      (candidate) =>
+        candidate.similarity >=
+        dismissalThreshold(finding, candidate.entry.path),
+    );
+    return match
+      ? `${match.entry.summary} (similarity ${match.similarity.toFixed(2)})`
       : null;
   }
 

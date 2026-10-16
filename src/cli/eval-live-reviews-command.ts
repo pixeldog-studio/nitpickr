@@ -13,6 +13,7 @@ import {
   UsageTracker,
 } from "../eval/live-review-evaluator.js";
 import { createLogger } from "../logging/logger.js";
+import type { MemoryEmbedder } from "../memory/memory-service.js";
 import { ChatReviewModel } from "../review/chat-review-model.js";
 import type { ReviewEngineOptions } from "../review/review-engine.js";
 
@@ -38,6 +39,8 @@ export interface EvalLiveReviewsInput {
   gitCommit?: string;
   /** Keep cases already recorded in `outFile` and run only the rest. */
   resume?: boolean;
+  /** Runs the dismissal filter for fixtures that carry dismissals. */
+  embedder?: MemoryEmbedder;
 }
 
 export const DEFAULT_LIVE_FIXTURE_DIRECTORY =
@@ -161,6 +164,7 @@ export class EvalLiveReviewsCommand {
       usage,
       completedCases,
       engineOptions: input.engineOptions ?? {},
+      ...(input.embedder ? { embedder: input.embedder } : {}),
       onCaseStart: (fixture, index) => {
         write(`[${index + 1}/${fixtures.length}] ${fixture.name} ...`);
       },

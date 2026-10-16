@@ -2,7 +2,8 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { z } from "zod";
-
+import { dismissalThreshold } from "../memory/dismissal-policy.js";
+import type { MemoryEmbedder } from "../memory/memory-service.js";
 import type { ModelCompletionInfo } from "../review/chat-review-model.js";
 import {
   ReviewEngine,
@@ -108,6 +109,20 @@ export const liveEvaluationFixtureSchema = z.object({
     priorThreads: z.array(priorThreadSchema).optional(),
     /** Prior completed reviews; drives the round-aware severity floor. */
     priorReviewRoundCount: z.number().int().nonnegative().default(0),
+    /**
+     * Findings this repo dismissed before (thumbs-down, resolved without a
+     * change). With an embedder configured the eval runs the production
+     * dismissal filter against them.
+     */
+    dismissals: z
+      .array(
+        z.object({
+          title: z.string().min(1),
+          body: z.string(),
+          path: z.string().nullable().default(null),
+        }),
+      )
+      .default([]),
   }),
   /** Ground truth. Empty array = a clean change where any finding is a false positive. */
   expectedFindings: z.array(expectedFindingSchema),
@@ -320,6 +335,8 @@ export interface LiveReviewEvaluatorOptions {
   model: ReviewModel;
   usage?: UsageTracker;
   engineOptions?: ReviewEngineOptions;
+  /** Embeds findings and dismissals to exercise the dismissal filter. */
+  embedder?: MemoryEmbedder;
   /**
    * Wait before retrying a case once after a transport failure (the model
    * server restarted or dropped the connection). Default 15 s.
@@ -370,6 +387,38 @@ export class LiveReviewEvaluator {
     return { cases, totals: summarizeReport(cases) };
   }
 
+  /** The production dismissal filter over the fixture's dismissals. */
+  async #dismissalCheck(
+    fixture: LiveEvaluationFixture,
+  ): Promise<((finding: ReviewFinding) => Promise<string | null>) | null> {
+    const embedder = this.#options.embedder;
+    if (!embedder || fixture.input.dismissals.length === 0) {
+      return null;
+    }
+    const dismissed = await Promise.all(
+      fixture.input.dismissals.map(async (entry) => ({
+        ...entry,
+        vector: await embedder.embed(
+          `${entry.title}. ${entry.body}`,
+          "document",
+        ),
+      })),
+    );
+    return async (finding) => {
+      const vector = await embedder.embed(
+        `${finding.title}. ${finding.body}`,
+        "document",
+      );
+      for (const entry of dismissed) {
+        const similarity = cosineSimilarity(vector, entry.vector);
+        if (similarity >= dismissalThreshold(finding, entry.path)) {
+          return `${entry.title} (similarity ${similarity.toFixed(2)})`;
+        }
+      }
+      return null;
+    };
+  }
+
   async #evaluateCase(
     engine: ReviewEngine,
     fixture: LiveEvaluationFixture,
@@ -395,11 +444,13 @@ export class LiveReviewEvaluator {
       const severityFloor = severityFloorForRound(
         fixture.input.priorReviewRoundCount,
       );
+      const dismissalCheck = await this.#dismissalCheck(fixture);
       const run = () =>
         engine.reviewWithDiagnostics({
           ...(fixture.input as ReviewEngineInput),
           publishableFindingTypes: ["bug", "safe_suggestion"],
           severityFloor,
+          ...(dismissalCheck ? { dismissalCheck } : {}),
         });
       let diagnostics: Awaited<ReturnType<typeof run>>;
       try {
@@ -599,9 +650,11 @@ export function summarizeLearningPairs(
     if (!applied) {
       return [];
     }
+    // An errored control has no findings, which would look like a change.
     const changed =
-      control.findings.length !== applied.findings.length ||
-      control.matched.length !== applied.matched.length;
+      control.error === null &&
+      (control.findings.length !== applied.findings.length ||
+        control.matched.length !== applied.matched.length);
     return [
       {
         name,
@@ -617,6 +670,22 @@ export function summarizeLearningPairs(
       },
     ];
   });
+}
+
+function cosineSimilarity(left: number[], right: number[]): number {
+  let dot = 0;
+  let leftNorm = 0;
+  let rightNorm = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index] ?? 0;
+    const b = right[index] ?? 0;
+    dot += a * b;
+    leftNorm += a * a;
+    rightNorm += b * b;
+  }
+  return leftNorm === 0 || rightNorm === 0
+    ? 0
+    : dot / Math.sqrt(leftNorm * rightNorm);
 }
 
 function median(values: number[]): number {

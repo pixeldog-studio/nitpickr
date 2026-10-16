@@ -193,6 +193,7 @@ export interface GitHubApiClient {
       fingerprint: string;
       isResolved: boolean;
       isOutdated?: boolean;
+      originalCommitSha?: string;
       body: string;
       reactionSummary: {
         positiveCount: number;
@@ -1039,6 +1040,7 @@ export class GitHubAdapter {
       fingerprint: string;
       isResolved: boolean;
       isOutdated?: boolean;
+      originalCommitSha?: string;
       body: string;
       reactionSummary: {
         positiveCount: number;

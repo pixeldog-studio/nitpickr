@@ -220,6 +220,12 @@ export class MemoryService {
       body: string;
       path: string | null;
     }>;
+    /**
+     * Only keep what the model classifier extracts; never fall back to the
+     * keyword heuristic. Conversation text is often a question ("is this a
+     * false positive?") that the heuristic would store verbatim.
+     */
+    classifierOnly?: boolean;
   }): Promise<MemoryIngestionResult> {
     const startedAt = process.hrtime.bigint();
     const now = this.#now().toISOString();
@@ -227,7 +233,10 @@ export class MemoryService {
     const savedEntries: MemoryEntry[] = [];
 
     for (const discussion of input.discussions) {
-      const result = await this.#classifyDiscussion(discussion);
+      const result = await this.#classifyDiscussion(
+        discussion,
+        input.classifierOnly ?? false,
+      );
       acknowledgments.push(result.acknowledgment);
 
       for (const candidate of result.entries) {
@@ -327,17 +336,23 @@ export class MemoryService {
     }
   }
 
-  async #classifyDiscussion(discussion: {
-    authorLogin: string;
-    body: string;
-    path: string | null;
-  }): Promise<MemoryClassifierResult> {
+  async #classifyDiscussion(
+    discussion: {
+      authorLogin: string;
+      body: string;
+      path: string | null;
+    },
+    classifierOnly: boolean,
+  ): Promise<MemoryClassifierResult> {
     if (this.#classifier) {
       try {
         return await this.#classifier.extract(discussion);
       } catch {
         // fall through to fallback so a classifier outage never drops a comment
       }
+    }
+    if (classifierOnly) {
+      return { entries: [], acknowledgment: "" };
     }
 
     const fallback = fallbackClassify(discussion.body);
