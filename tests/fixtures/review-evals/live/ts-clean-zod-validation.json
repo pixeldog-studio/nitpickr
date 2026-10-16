@@ -1,0 +1,26 @@
+{
+  "name": "ts-clean-zod-validation",
+  "source": "synthetic",
+  "kind": "clean",
+  "stack": "typescript",
+  "expectedVerdicts": [],
+  "input": {
+    "changeRequest": {
+      "title": "Validate the create-project body",
+      "number": 100
+    },
+    "files": [
+      {
+        "path": "src/api/projects/create.ts",
+        "additions": 10,
+        "deletions": 2,
+        "patch": "@@ -1,11 +1,19 @@\n import type { FastifyInstance } from \"fastify\";\n+import { z } from \"zod\";\n+\n+const createProjectBody = z.object({\n+  name: z.string().trim().min(1).max(120),\n+});\n \n export async function registerCreateProject(app: FastifyInstance) {\n   app.post(\"/projects\", async (request, reply) => {\n-    const body = request.body as { name: string };\n+    const parsed = createProjectBody.safeParse(request.body);\n+    if (!parsed.success) {\n+      return reply.code(400).send({ error: parsed.error.flatten() });\n+    }\n     const project = await app.projects.create({\n       ownerId: request.user.id,\n-      name: body.name,\n+      name: parsed.data.name,\n     });\n     return reply.code(201).send(project);\n   });",
+        "fileContent": "import type { FastifyInstance } from \"fastify\";\nimport { z } from \"zod\";\n\nconst createProjectBody = z.object({\n  name: z.string().trim().min(1).max(120),\n});\n\nexport async function registerCreateProject(app: FastifyInstance) {\n  app.post(\"/projects\", async (request, reply) => {\n    const parsed = createProjectBody.safeParse(request.body);\n    if (!parsed.success) {\n      return reply.code(400).send({ error: parsed.error.flatten() });\n    }\n    const project = await app.projects.create({\n      ownerId: request.user.id,\n      name: parsed.data.name,\n    });\n    return reply.code(201).send(project);\n  });\n}\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10
+  },
+  "expectedFindings": []
+}

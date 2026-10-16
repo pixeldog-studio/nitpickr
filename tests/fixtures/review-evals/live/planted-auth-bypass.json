@@ -1,6 +1,8 @@
 {
   "name": "planted-auth-bypass",
   "source": "synthetic",
+  "kind": "planted",
+  "stack": "typescript",
   "input": {
     "changeRequest": {
       "title": "Add project deletion endpoint",

@@ -1,0 +1,39 @@
+{
+  "name": "sql-blocking-index-and-not-null",
+  "source": "synthetic",
+  "kind": "planted",
+  "stack": "sql",
+  "expectedVerdicts": [],
+  "input": {
+    "changeRequest": {
+      "title": "Index orders by customer and require status",
+      "number": 100
+    },
+    "files": [
+      {
+        "path": "db/migrations/0042_orders_customer_status.sql",
+        "additions": 6,
+        "deletions": 0,
+        "patch": "@@ -0,0 +1,6 @@\n+-- orders has ~40M rows in production.\n+create index orders_customer_id_idx on orders (customer_id);\n+\n+alter table orders add column status text;\n+update orders set status = 'completed' where status is null;\n+alter table orders alter column status set not null;",
+        "fileContent": "-- orders has ~40M rows in production.\ncreate index orders_customer_id_idx on orders (customer_id);\n\nalter table orders add column status text;\nupdate orders set status = 'completed' where status is null;\nalter table orders alter column status set not null;\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10
+  },
+  "expectedFindings": [
+    {
+      "label": "index built without CONCURRENTLY blocks writes on a 40M-row table",
+      "path": "db/migrations/0042_orders_customer_status.sql",
+      "lineStart": 2,
+      "lineEnd": 2
+    },
+    {
+      "label": "unbatched backfill of 40M rows in one statement holds locks and bloats",
+      "path": "db/migrations/0042_orders_customer_status.sql",
+      "lineStart": 5,
+      "lineEnd": 5
+    }
+  ]
+}

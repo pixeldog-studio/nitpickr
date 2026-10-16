@@ -11,6 +11,10 @@ import {
   type ReviewFinding,
   type ReviewModel,
 } from "../review/review-engine.js";
+import {
+  applySeverityFloor,
+  severityFloorForRound,
+} from "../review/severity-floor.js";
 
 /**
  * Live-model review evaluation: runs real diffs through `ReviewEngine` against
@@ -45,10 +49,45 @@ const expectedFindingSchema = z.object({
     .optional(),
 });
 
+const priorThreadSchema = z.object({
+  id: z.string().min(1),
+  needsVerdict: z.boolean(),
+  path: z.string().min(1),
+  line: z.number().int().positive(),
+  state: z.enum(["open", "resolved", "dismissed", "stale"]),
+  title: z.string().min(1),
+  fingerprint: z.string().min(1),
+  userReply: z.string().optional(),
+});
+
+const verdictSchema = z.enum(["fixed", "still_applies", "obsolete"]);
+
+export const fixtureKinds = [
+  "planted",
+  "clean",
+  "captured_bug",
+  "captured_clean",
+  "multi_round",
+  "injection",
+] as const;
+export const fixtureStacks = [
+  "swift",
+  "typescript",
+  "python",
+  "sql",
+  "other",
+] as const;
+
 export const liveEvaluationFixtureSchema = z.object({
   name: z.string().min(1),
   /** Where the case came from (PR URL, "synthetic", ...). Informational. */
   source: z.string().optional(),
+  kind: z.enum(fixtureKinds).default("planted"),
+  stack: z.enum(fixtureStacks).default("other"),
+  /** Expected verdicts for prior threads that need one (multi-round cases). */
+  expectedVerdicts: z
+    .array(z.object({ threadId: z.string().min(1), verdict: verdictSchema }))
+    .default([]),
   input: z.object({
     changeRequest: z.object({
       title: z.string().min(1),
@@ -63,6 +102,10 @@ export const liveEvaluationFixtureSchema = z.object({
       )
       .default([]),
     commentBudget: z.number().int().positive().default(10),
+    scope: z.enum(["full_pr", "commit_delta"]).optional(),
+    priorThreads: z.array(priorThreadSchema).optional(),
+    /** Prior completed reviews; drives the round-aware severity floor. */
+    priorReviewRoundCount: z.number().int().nonnegative().default(0),
   }),
   /** Ground truth. Empty array = a clean change where any finding is a false positive. */
   expectedFindings: z.array(expectedFindingSchema),
@@ -74,9 +117,26 @@ export type ExpectedFinding = z.infer<typeof expectedFindingSchema>;
 /** Lines of slack when matching a published finding to an expectation. */
 export const LINE_MATCH_TOLERANCE = 2;
 
+/** A published finding the owner would call a nitpick: low or style. */
+export function isNit(finding: Pick<ReviewFinding, "severity" | "category">) {
+  return finding.severity === "low" || finding.category === "style";
+}
+
+function isMediumPlus(finding: Pick<ReviewFinding, "severity">) {
+  return finding.severity !== "low";
+}
+
 export interface LiveCaseReport {
   name: string;
   source: string | null;
+  kind: (typeof fixtureKinds)[number];
+  stack: (typeof fixtureStacks)[number];
+  /** Matched findings of medium+ severity, and all medium+ published. */
+  matchedMediumPlus: number;
+  publishedMediumPlus: number;
+  nitCount: number;
+  verdictsExpected: number;
+  verdictsCorrect: number;
   durationMs: number;
   modelCalls: number;
   promptTokens: number | null;
@@ -104,20 +164,32 @@ export interface LiveCaseReport {
   error: string | null;
 }
 
+export interface LiveEvaluationTotals {
+  cases: number;
+  failedCases: number;
+  expected: number;
+  matched: number;
+  published: number;
+  unexpected: number;
+  precision: number;
+  recall: number;
+  /** Precision over medium+ findings only (the goal's headline number). */
+  precisionMediumPlus: number;
+  nitCount: number;
+  /** Findings published on cases that expect none. */
+  cleanCaseFalsePositives: number;
+  verdictAccuracy: number | null;
+  medianCaseMs: number;
+  durationMs: number;
+  promptTokens: number | null;
+  completionTokens: number | null;
+}
+
 export interface LiveEvaluationReport {
   cases: LiveCaseReport[];
-  totals: {
-    cases: number;
-    failedCases: number;
-    expected: number;
-    matched: number;
-    published: number;
-    unexpected: number;
-    precision: number;
-    recall: number;
-    durationMs: number;
-    promptTokens: number | null;
-    completionTokens: number | null;
+  totals: LiveEvaluationTotals & {
+    byStack: Record<string, LiveEvaluationTotals>;
+    byKind: Record<string, LiveEvaluationTotals>;
   };
 }
 
@@ -268,22 +340,53 @@ export class LiveReviewEvaluator {
     const base = {
       name: fixture.name,
       source: fixture.source ?? null,
+      kind: fixture.kind,
+      stack: fixture.stack,
+      verdictsExpected: fixture.expectedVerdicts.length,
     };
 
     try {
+      // Mirrors the worker: automatic-trigger publishable types, the
+      // round-aware floor, then the floor again after the engine (a no-op
+      // when the engine already applies it; the worker did this before).
+      const severityFloor = severityFloorForRound(
+        fixture.input.priorReviewRoundCount,
+      );
       const diagnostics = await engine.reviewWithDiagnostics({
         ...(fixture.input as ReviewEngineInput),
         publishableFindingTypes: ["bug", "safe_suggestion"],
+        severityFloor,
       });
       const usage = this.#options.usage?.take();
-      const findings = diagnostics.result.findings;
+      const findings = applySeverityFloor(diagnostics.result, severityFloor)
+        .kept.findings;
       const { matched, missed, unexpected } = matchFindings(
         findings,
         fixture.expectedFindings,
       );
+      const verdicts = new Map(
+        (
+          (
+            diagnostics.result as {
+              priorThreadVerdicts?: Array<{
+                threadId: string;
+                verdict: string;
+              }>;
+            }
+          ).priorThreadVerdicts ?? []
+        ).map((entry) => [entry.threadId, entry.verdict]),
+      );
 
       return {
         ...base,
+        matchedMediumPlus: matched.filter((entry) =>
+          isMediumPlus(entry.finding),
+        ).length,
+        publishedMediumPlus: findings.filter(isMediumPlus).length,
+        nitCount: findings.filter(isNit).length,
+        verdictsCorrect: fixture.expectedVerdicts.filter(
+          (entry) => verdicts.get(entry.threadId) === entry.verdict,
+        ).length,
         durationMs: elapsedMs(),
         modelCalls:
           usage?.calls ?? diagnostics.promptUsage.afterCompaction.chunkCount,
@@ -319,6 +422,10 @@ export class LiveReviewEvaluator {
       const usage = this.#options.usage?.take();
       return {
         ...base,
+        matchedMediumPlus: 0,
+        publishedMediumPlus: 0,
+        nitCount: 0,
+        verdictsCorrect: 0,
         durationMs: elapsedMs(),
         modelCalls: usage?.calls ?? 0,
         promptTokens: usage?.promptTokens ?? null,
@@ -338,20 +445,31 @@ export class LiveReviewEvaluator {
   }
 }
 
-function summarize(cases: LiveCaseReport[]): LiveEvaluationReport["totals"] {
-  const expected = cases.reduce(
-    (sum, entry) => sum + entry.matched.length + entry.missed.length,
-    0,
+function median(values: number[]): number {
+  if (values.length === 0) {
+    return 0;
+  }
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2
+    : (sorted[middle] ?? 0);
+}
+
+function sum(cases: LiveCaseReport[], pick: (entry: LiveCaseReport) => number) {
+  return cases.reduce((total, entry) => total + pick(entry), 0);
+}
+
+export function summarizeCases(cases: LiveCaseReport[]): LiveEvaluationTotals {
+  const expected = sum(
+    cases,
+    (entry) => entry.matched.length + entry.missed.length,
   );
-  const matched = cases.reduce((sum, entry) => sum + entry.matched.length, 0);
-  const published = cases.reduce(
-    (sum, entry) => sum + entry.findings.length,
-    0,
-  );
-  const unexpected = cases.reduce(
-    (sum, entry) => sum + entry.unexpected.length,
-    0,
-  );
+  const matched = sum(cases, (entry) => entry.matched.length);
+  const published = sum(cases, (entry) => entry.findings.length);
+  const matchedMediumPlus = sum(cases, (entry) => entry.matchedMediumPlus);
+  const publishedMediumPlus = sum(cases, (entry) => entry.publishedMediumPlus);
+  const verdictsExpected = sum(cases, (entry) => entry.verdictsExpected);
   const sawTokens = cases.some((entry) => entry.promptTokens !== null);
   return {
     cases: cases.length,
@@ -359,15 +477,51 @@ function summarize(cases: LiveCaseReport[]): LiveEvaluationReport["totals"] {
     expected,
     matched,
     published,
-    unexpected,
+    unexpected: sum(cases, (entry) => entry.unexpected.length),
     precision: published === 0 ? 1 : matched / published,
     recall: expected === 0 ? 1 : matched / expected,
-    durationMs: cases.reduce((sum, entry) => sum + entry.durationMs, 0),
+    precisionMediumPlus:
+      publishedMediumPlus === 0 ? 1 : matchedMediumPlus / publishedMediumPlus,
+    nitCount: sum(cases, (entry) => entry.nitCount),
+    cleanCaseFalsePositives: sum(cases, (entry) =>
+      entry.matched.length + entry.missed.length === 0
+        ? entry.findings.length
+        : 0,
+    ),
+    verdictAccuracy:
+      verdictsExpected === 0
+        ? null
+        : sum(cases, (entry) => entry.verdictsCorrect) / verdictsExpected,
+    medianCaseMs: median(cases.map((entry) => entry.durationMs)),
+    durationMs: sum(cases, (entry) => entry.durationMs),
     promptTokens: sawTokens
-      ? cases.reduce((sum, entry) => sum + (entry.promptTokens ?? 0), 0)
+      ? sum(cases, (entry) => entry.promptTokens ?? 0)
       : null,
     completionTokens: sawTokens
-      ? cases.reduce((sum, entry) => sum + (entry.completionTokens ?? 0), 0)
+      ? sum(cases, (entry) => entry.completionTokens ?? 0)
       : null,
+  };
+}
+
+function groupBy(
+  cases: LiveCaseReport[],
+  key: (entry: LiveCaseReport) => string,
+): Record<string, LiveEvaluationTotals> {
+  const groups = new Map<string, LiveCaseReport[]>();
+  for (const entry of cases) {
+    groups.set(key(entry), [...(groups.get(key(entry)) ?? []), entry]);
+  }
+  return Object.fromEntries(
+    [...groups.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([name, group]) => [name, summarizeCases(group)]),
+  );
+}
+
+function summarize(cases: LiveCaseReport[]): LiveEvaluationReport["totals"] {
+  return {
+    ...summarizeCases(cases),
+    byStack: groupBy(cases, (entry) => entry.stack),
+    byKind: groupBy(cases, (entry) => entry.kind),
   };
 }

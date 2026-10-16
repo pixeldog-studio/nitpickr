@@ -1,0 +1,33 @@
+{
+  "name": "swift-actor-reentrancy",
+  "source": "synthetic",
+  "kind": "planted",
+  "stack": "swift",
+  "expectedVerdicts": [],
+  "input": {
+    "changeRequest": {
+      "title": "Cache avatar images in an actor",
+      "number": 100
+    },
+    "files": [
+      {
+        "path": "Sources/Avatars/AvatarCache.swift",
+        "additions": 26,
+        "deletions": 0,
+        "patch": "@@ -0,0 +1,26 @@\n+import Foundation\n+\n+actor AvatarCache {\n+    private var images: [URL: Data] = [:]\n+    private var downloadsInFlight = 0\n+    private let session: URLSession\n+\n+    init(session: URLSession = .shared) {\n+        self.session = session\n+    }\n+\n+    func image(for url: URL) async throws -> Data {\n+        if let cached = images[url] {\n+            return cached\n+        }\n+        downloadsInFlight += 1\n+        let (data, _) = try await session.data(from: url)\n+        downloadsInFlight -= 1\n+        images[url] = data\n+        return data\n+    }\n+\n+    func clear() {\n+        images.removeAll()\n+    }\n+}",
+        "fileContent": "import Foundation\n\nactor AvatarCache {\n    private var images: [URL: Data] = [:]\n    private var downloadsInFlight = 0\n    private let session: URLSession\n\n    init(session: URLSession = .shared) {\n        self.session = session\n    }\n\n    func image(for url: URL) async throws -> Data {\n        if let cached = images[url] {\n            return cached\n        }\n        downloadsInFlight += 1\n        let (data, _) = try await session.data(from: url)\n        downloadsInFlight -= 1\n        images[url] = data\n        return data\n    }\n\n    func clear() {\n        images.removeAll()\n    }\n}\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10
+  },
+  "expectedFindings": [
+    {
+      "label": "counter never decremented when the download throws; concurrent calls for the same URL all download (reentrancy)",
+      "path": "Sources/Avatars/AvatarCache.swift",
+      "lineStart": 17,
+      "lineEnd": 18
+    }
+  ]
+}

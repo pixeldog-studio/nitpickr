@@ -1,0 +1,33 @@
+{
+  "name": "swift-force-unwrap-deeplink",
+  "source": "synthetic",
+  "kind": "planted",
+  "stack": "swift",
+  "expectedVerdicts": [],
+  "input": {
+    "changeRequest": {
+      "title": "Open shared plant links",
+      "number": 100
+    },
+    "files": [
+      {
+        "path": "App/DeepLinks/PlantLinkRouter.swift",
+        "additions": 17,
+        "deletions": 0,
+        "patch": "@@ -0,0 +1,17 @@\n+import SwiftUI\n+\n+struct PlantLinkRouter {\n+    let openURL: OpenURLAction\n+\n+    /// Called with the raw `?share=` value from a link another user sent.\n+    func openShared(slug: String) {\n+        let url = URL(string: \"https://plants.example.com/p/\\(slug)\")!\n+        openURL(url)\n+    }\n+\n+    func openSettings() {\n+        if let url = URL(string: UIApplication.openSettingsURLString) {\n+            openURL(url)\n+        }\n+    }\n+}",
+        "fileContent": "import SwiftUI\n\nstruct PlantLinkRouter {\n    let openURL: OpenURLAction\n\n    /// Called with the raw `?share=` value from a link another user sent.\n    func openShared(slug: String) {\n        let url = URL(string: \"https://plants.example.com/p/\\(slug)\")!\n        openURL(url)\n    }\n\n    func openSettings() {\n        if let url = URL(string: UIApplication.openSettingsURLString) {\n            openURL(url)\n        }\n    }\n}\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10
+  },
+  "expectedFindings": [
+    {
+      "label": "force-unwrapped URL built from untrusted link input crashes on invalid characters",
+      "path": "App/DeepLinks/PlantLinkRouter.swift",
+      "lineStart": 8,
+      "lineEnd": 8
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "name": "rubenspessoa-ai-automation-9-fro-296-fix-empty-error-field-in-pr-reconcile-subprocess-fai",
+  "source": "https://github.com/rubenspessoa/ai-automation/pull/9",
+  "kind": "captured_clean",
+  "stack": "python",
+  "expectedVerdicts": [],
+  "input": {
+    "changeRequest": {
+      "title": "FRO-296: fix empty error= field in pr_reconcile_subprocess_failed logs",
+      "number": 9
+    },
+    "files": [
+      {
+        "path": "crew/chat_bridge/main.py",
+        "additions": 1,
+        "deletions": 1,
+        "patch": "@@ -318,7 +318,7 @@ async def _reconcile_merged_prs_once(self) -> None:\n                 log.warning(\n                     \"bridge.pr_reconcile_subprocess_failed\",\n                     path=key,\n-                    error=str(e),\n+                    error=repr(e),\n                 )\n                 continue\n             if proc.returncode != 0:",
+        "fileContent": null
+      },
+      {
+        "path": "tests/unit/test_pr_reconciler.py",
+        "additions": 67,
+        "deletions": 0,
+        "patch": "@@ -0,0 +1,67 @@\n+\"\"\"Unit tests for _reconcile_merged_prs_once failure branch (FRO-296).\n+\n+Regression: error=str(e) is \"\" for TimeoutError() (and other zero-message\n+exceptions), making bridge.pr_reconcile_subprocess_failed logs unactionable.\n+Fix: error=repr(e) includes the class name in all three caught exception types.\n+\"\"\"\n+\n+from __future__ import annotations\n+\n+import asyncio\n+from pathlib import Path\n+from unittest.mock import MagicMock\n+\n+import pytest\n+import structlog.testing\n+\n+from crew.chat_bridge.main import CrewBridge\n+\n+\n+@pytest.mark.asyncio\n+@pytest.mark.parametrize(\n+    \"exc\",\n+    [\n+        TimeoutError(),\n+        FileNotFoundError(2, \"gh: not found\"),\n+        OSError(13, \"perm denied\"),\n+    ],\n+    ids=[\"TimeoutError\", \"FileNotFoundError\", \"OSError\"],\n+)\n+async def test_pr_reconcile_subprocess_failure_logs_class_name(\n+    exc: Exception,\n+    tmp_path: Path,\n+    monkeypatch: pytest.MonkeyPatch,\n+) -> None:\n+    repo = tmp_path / \"repo\"\n+    (repo / \".git\").mkdir(parents=True)\n+\n+    monkeypatch.setattr(\n+        \"crew.chat_bridge.main._load_config\",\n+        lambda: {\"projects\": {\"x\": {\"path\": str(repo)}}},\n+    )\n+\n+    async def _raise_exc(*args: object, **kwargs: object) -> None:\n+        raise exc\n+\n+    monkeypatch.setattr(asyncio, \"create_subprocess_exec\", _raise_exc)\n+\n+    bridge = CrewBridge.__new__(CrewBridge)\n+    bridge.sessions = MagicMock()\n+\n+    with structlog.testing.capture_logs() as cap:\n+        await bridge._reconcile_merged_prs_once()\n+\n+    records = [r for r in cap if r[\"event\"] == \"bridge.pr_reconcile_subprocess_failed\"]\n+    assert len(records) == 1, f\"expected 1 record, got {len(records)}: {cap}\"\n+    record = records[0]\n+\n+    # Bug-fix invariant: error field must be non-empty (str(e) was \"\" for TimeoutError)\n+    assert record[\"error\"], f\"error field is empty for {type(exc).__name__}: {record}\"\n+\n+    # Intent: class name appears in repr so logs are self-identifying\n+    assert type(exc).__name__ in record[\"error\"], (\n+        f\"class name {type(exc).__name__!r} not in error={record['error']!r}\"\n+    )\n+\n+    # Voice anchor: event name and existing path= field are preserved\n+    assert record[\"path\"] == str(repo)",
+        "fileContent": "\"\"\"Unit tests for _reconcile_merged_prs_once failure branch (FRO-296).\n\nRegression: error=str(e) is \"\" for TimeoutError() (and other zero-message\nexceptions), making bridge.pr_reconcile_subprocess_failed logs unactionable.\nFix: error=repr(e) includes the class name in all three caught exception types.\n\"\"\"\n\nfrom __future__ import annotations\n\nimport asyncio\nfrom pathlib import Path\nfrom unittest.mock import MagicMock\n\nimport pytest\nimport structlog.testing\n\nfrom crew.chat_bridge.main import CrewBridge\n\n\n@pytest.mark.asyncio\n@pytest.mark.parametrize(\n    \"exc\",\n    [\n        TimeoutError(),\n        FileNotFoundError(2, \"gh: not found\"),\n        OSError(13, \"perm denied\"),\n    ],\n    ids=[\"TimeoutError\", \"FileNotFoundError\", \"OSError\"],\n)\nasync def test_pr_reconcile_subprocess_failure_logs_class_name(\n    exc: Exception,\n    tmp_path: Path,\n    monkeypatch: pytest.MonkeyPatch,\n) -> None:\n    repo = tmp_path / \"repo\"\n    (repo / \".git\").mkdir(parents=True)\n\n    monkeypatch.setattr(\n        \"crew.chat_bridge.main._load_config\",\n        lambda: {\"projects\": {\"x\": {\"path\": str(repo)}}},\n    )\n\n    async def _raise_exc(*args: object, **kwargs: object) -> None:\n        raise exc\n\n    monkeypatch.setattr(asyncio, \"create_subprocess_exec\", _raise_exc)\n\n    bridge = CrewBridge.__new__(CrewBridge)\n    bridge.sessions = MagicMock()\n\n    with structlog.testing.capture_logs() as cap:\n        await bridge._reconcile_merged_prs_once()\n\n    records = [r for r in cap if r[\"event\"] == \"bridge.pr_reconcile_subprocess_failed\"]\n    assert len(records) == 1, f\"expected 1 record, got {len(records)}: {cap}\"\n    record = records[0]\n\n    # Bug-fix invariant: error field must be non-empty (str(e) was \"\" for TimeoutError)\n    assert record[\"error\"], f\"error field is empty for {type(exc).__name__}: {record}\"\n\n    # Intent: class name appears in repr so logs are self-identifying\n    assert type(exc).__name__ in record[\"error\"], (\n        f\"class name {type(exc).__name__!r} not in error={record['error']!r}\"\n    )\n\n    # Voice anchor: event name and existing path= field are preserved\n    assert record[\"path\"] == str(repo)\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10,
+    "priorReviewRoundCount": 0
+  },
+  "expectedFindings": []
+}

@@ -1,0 +1,33 @@
+{
+  "name": "py-swallowed-exception-data-loss",
+  "source": "synthetic",
+  "kind": "planted",
+  "stack": "python",
+  "expectedVerdicts": [],
+  "input": {
+    "changeRequest": {
+      "title": "Persist usage events in batches",
+      "number": 100
+    },
+    "files": [
+      {
+        "path": "backend/usage/recorder.py",
+        "additions": 25,
+        "deletions": 0,
+        "patch": "@@ -0,0 +1,25 @@\n+import logging\n+\n+from backend.db import Session\n+from backend.usage.models import UsageEvent\n+\n+logger = logging.getLogger(__name__)\n+\n+\n+class UsageRecorder:\n+    def __init__(self) -> None:\n+        self._buffer: list[UsageEvent] = []\n+\n+    def record(self, event: UsageEvent) -> None:\n+        self._buffer.append(event)\n+        if len(self._buffer) >= 100:\n+            self.flush()\n+\n+    def flush(self) -> None:\n+        batch, self._buffer = self._buffer, []\n+        try:\n+            with Session() as session:\n+                session.add_all(batch)\n+                session.commit()\n+        except Exception:\n+            pass",
+        "fileContent": "import logging\n\nfrom backend.db import Session\nfrom backend.usage.models import UsageEvent\n\nlogger = logging.getLogger(__name__)\n\n\nclass UsageRecorder:\n    def __init__(self) -> None:\n        self._buffer: list[UsageEvent] = []\n\n    def record(self, event: UsageEvent) -> None:\n        self._buffer.append(event)\n        if len(self._buffer) >= 100:\n            self.flush()\n\n    def flush(self) -> None:\n        batch, self._buffer = self._buffer, []\n        try:\n            with Session() as session:\n                session.add_all(batch)\n                session.commit()\n        except Exception:\n            pass\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10
+  },
+  "expectedFindings": [
+    {
+      "label": "a failed commit silently drops the whole batch (buffer already cleared, error swallowed)",
+      "path": "backend/usage/recorder.py",
+      "lineStart": 24,
+      "lineEnd": 25
+    }
+  ]
+}

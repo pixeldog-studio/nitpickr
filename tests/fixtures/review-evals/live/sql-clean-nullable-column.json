@@ -1,0 +1,26 @@
+{
+  "name": "sql-clean-nullable-column",
+  "source": "synthetic",
+  "kind": "clean",
+  "stack": "sql",
+  "expectedVerdicts": [],
+  "input": {
+    "changeRequest": {
+      "title": "Add optional nickname to plants",
+      "number": 100
+    },
+    "files": [
+      {
+        "path": "supabase/migrations/20261005090000_plant_nickname.sql",
+        "additions": 3,
+        "deletions": 0,
+        "patch": "@@ -0,0 +1,3 @@\n+alter table public.plants add column nickname text;\n+\n+comment on column public.plants.nickname is 'Optional user-chosen display name.';",
+        "fileContent": "alter table public.plants add column nickname text;\n\ncomment on column public.plants.nickname is 'Optional user-chosen display name.';\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10
+  },
+  "expectedFindings": []
+}

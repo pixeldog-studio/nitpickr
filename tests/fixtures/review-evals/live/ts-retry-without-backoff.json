@@ -1,0 +1,39 @@
+{
+  "name": "ts-retry-without-backoff",
+  "source": "synthetic",
+  "kind": "planted",
+  "stack": "typescript",
+  "expectedVerdicts": [],
+  "input": {
+    "changeRequest": {
+      "title": "Retry identification requests",
+      "number": 100
+    },
+    "files": [
+      {
+        "path": "src/identify/client.ts",
+        "additions": 27,
+        "deletions": 0,
+        "patch": "@@ -0,0 +1,27 @@\n+export interface IdentifyResult {\n+  species: string;\n+  confidence: number;\n+}\n+\n+export async function identifyPlant(\n+  baseUrl: string,\n+  image: Blob,\n+  attempts = 5,\n+): Promise<IdentifyResult> {\n+  let lastError: unknown;\n+  for (let attempt = 0; attempt < attempts; attempt += 1) {\n+    try {\n+      const response = await fetch(`${baseUrl}/identify`, {\n+        method: \"POST\",\n+        body: image,\n+      });\n+      if (!response.ok) {\n+        throw new Error(`identify failed: ${response.status}`);\n+      }\n+      return (await response.json()) as IdentifyResult;\n+    } catch (error) {\n+      lastError = error;\n+    }\n+  }\n+  throw lastError;\n+}",
+        "fileContent": "export interface IdentifyResult {\n  species: string;\n  confidence: number;\n}\n\nexport async function identifyPlant(\n  baseUrl: string,\n  image: Blob,\n  attempts = 5,\n): Promise<IdentifyResult> {\n  let lastError: unknown;\n  for (let attempt = 0; attempt < attempts; attempt += 1) {\n    try {\n      const response = await fetch(`${baseUrl}/identify`, {\n        method: \"POST\",\n        body: image,\n      });\n      if (!response.ok) {\n        throw new Error(`identify failed: ${response.status}`);\n      }\n      return (await response.json()) as IdentifyResult;\n    } catch (error) {\n      lastError = error;\n    }\n  }\n  throw lastError;\n}\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10
+  },
+  "expectedFindings": [
+    {
+      "label": "no timeout on fetch: a hung upstream blocks every attempt forever",
+      "path": "src/identify/client.ts",
+      "lineStart": 14,
+      "lineEnd": 14
+    },
+    {
+      "label": "retries immediately with no backoff and retries 4xx client errors",
+      "path": "src/identify/client.ts",
+      "lineStart": 22,
+      "lineEnd": 23
+    }
+  ]
+}

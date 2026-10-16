@@ -85,6 +85,9 @@ async function main(): Promise<void> {
           maxTotalCharactersPerChunk: bootstrap.models.reviewChunkMaxTotalChars,
         },
         startedAt: new Date().toISOString(),
+        ...(flagString(args, "commit")
+          ? { gitCommit: flagString(args, "commit") as string }
+          : {}),
         ...(flagString(args, "fixtures")
           ? { fixtureDirectory: flagString(args, "fixtures") as string }
           : {}),

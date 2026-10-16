@@ -1,6 +1,8 @@
 {
   "name": "planted-resource-leak",
   "source": "synthetic",
+  "kind": "planted",
+  "stack": "typescript",
   "input": {
     "changeRequest": {
       "title": "Add chunked uploader",

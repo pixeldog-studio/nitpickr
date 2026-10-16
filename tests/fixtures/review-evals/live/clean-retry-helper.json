@@ -1,6 +1,8 @@
 {
   "name": "clean-retry-helper",
   "source": "synthetic",
+  "kind": "clean",
+  "stack": "typescript",
   "input": {
     "changeRequest": {
       "title": "Add retry helper",

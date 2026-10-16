@@ -1,0 +1,33 @@
+{
+  "name": "py-blocking-call-in-async",
+  "source": "synthetic",
+  "kind": "planted",
+  "stack": "python",
+  "expectedVerdicts": [],
+  "input": {
+    "changeRequest": {
+      "title": "Fetch weather for the daily digest",
+      "number": 100
+    },
+    "files": [
+      {
+        "path": "automation/digest/weather.py",
+        "additions": 12,
+        "deletions": 0,
+        "patch": "@@ -0,0 +1,12 @@\n+import requests\n+\n+from automation.digest.models import Forecast\n+\n+WEATHER_URL = \"https://api.weather.example.com/v1/forecast\"\n+\n+\n+async def fetch_forecast(city: str) -> Forecast:\n+    response = requests.get(WEATHER_URL, params={\"city\": city})\n+    response.raise_for_status()\n+    payload = response.json()\n+    return Forecast(city=city, summary=payload[\"summary\"], high=payload[\"high\"])",
+        "fileContent": "import requests\n\nfrom automation.digest.models import Forecast\n\nWEATHER_URL = \"https://api.weather.example.com/v1/forecast\"\n\n\nasync def fetch_forecast(city: str) -> Forecast:\n    response = requests.get(WEATHER_URL, params={\"city\": city})\n    response.raise_for_status()\n    payload = response.json()\n    return Forecast(city=city, summary=payload[\"summary\"], high=payload[\"high\"])\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10
+  },
+  "expectedFindings": [
+    {
+      "label": "blocking requests call (with no timeout) inside an async function stalls the event loop",
+      "path": "automation/digest/weather.py",
+      "lineStart": 9,
+      "lineEnd": 9
+    }
+  ]
+}

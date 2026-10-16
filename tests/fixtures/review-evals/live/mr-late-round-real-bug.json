@@ -1,0 +1,35 @@
+{
+  "name": "mr-late-round-real-bug",
+  "source": "synthetic",
+  "kind": "multi_round",
+  "stack": "typescript",
+  "expectedVerdicts": [],
+  "input": {
+    "changeRequest": {
+      "title": "Apply discount codes at checkout",
+      "number": 100
+    },
+    "files": [
+      {
+        "path": "src/checkout/discount.ts",
+        "additions": 3,
+        "deletions": 1,
+        "patch": "@@ -1,7 +1,9 @@\n export interface Cart {\n   subtotalCents: number;\n+  discountPercent?: number;\n }\n \n export function totalCents(cart: Cart): number {\n-  return cart.subtotalCents;\n+  const discount = cart.discountPercent ?? 0;\n+  return cart.subtotalCents - cart.subtotalCents * discount;\n }",
+        "fileContent": "export interface Cart {\n  subtotalCents: number;\n  discountPercent?: number;\n}\n\nexport function totalCents(cart: Cart): number {\n  const discount = cart.discountPercent ?? 0;\n  return cart.subtotalCents - cart.subtotalCents * discount;\n}\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10,
+    "scope": "commit_delta",
+    "priorReviewRoundCount": 3
+  },
+  "expectedFindings": [
+    {
+      "label": "percent applied as a fraction: a 20% discount multiplies by 20 and makes the total negative",
+      "path": "src/checkout/discount.ts",
+      "lineStart": 8,
+      "lineEnd": 8
+    }
+  ]
+}

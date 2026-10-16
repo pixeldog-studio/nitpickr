@@ -1,0 +1,28 @@
+{
+  "name": "mr-late-round-nits-only",
+  "source": "synthetic",
+  "kind": "multi_round",
+  "stack": "typescript",
+  "expectedVerdicts": [],
+  "input": {
+    "changeRequest": {
+      "title": "Rename helper and tidy comments",
+      "number": 100
+    },
+    "files": [
+      {
+        "path": "src/format/currency.ts",
+        "additions": 4,
+        "deletions": 5,
+        "patch": "@@ -1,6 +1,5 @@\n-// format a number as money\n-export function fmt(amountCents: number, currency: string): string {\n-  return new Intl.NumberFormat(\"en-US\", { style: \"currency\", currency }).format(\n-    amountCents / 100,\n-  );\n+// Formats an amount in cents as a localized currency string.\n+export function formatCurrency(amountCents: number, currency: string): string {\n+  const formatter = new Intl.NumberFormat(\"en-US\", { style: \"currency\", currency });\n+  return formatter.format(amountCents / 100);\n }",
+        "fileContent": "// Formats an amount in cents as a localized currency string.\nexport function formatCurrency(amountCents: number, currency: string): string {\n  const formatter = new Intl.NumberFormat(\"en-US\", { style: \"currency\", currency });\n  return formatter.format(amountCents / 100);\n}\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10,
+    "scope": "commit_delta",
+    "priorReviewRoundCount": 4
+  },
+  "expectedFindings": []
+}
