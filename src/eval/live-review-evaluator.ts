@@ -294,10 +294,27 @@ function describeExpected(expected: ExpectedFinding): string {
   return `${expected.path}:${range} ${expected.label}`;
 }
 
+const TRANSPORT_ERROR_PATTERN =
+  /fetch failed|ECONNREFUSED|ECONNRESET|socket hang up|other side closed|status 5\d\d/i;
+
+export function isTransportError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const cause =
+    error instanceof Error && error.cause instanceof Error
+      ? error.cause.message
+      : "";
+  return TRANSPORT_ERROR_PATTERN.test(`${message} ${cause}`);
+}
+
 export interface LiveReviewEvaluatorOptions {
   model: ReviewModel;
   usage?: UsageTracker;
   engineOptions?: ReviewEngineOptions;
+  /**
+   * Wait before retrying a case once after a transport failure (the model
+   * server restarted or dropped the connection). Default 15 s.
+   */
+  transportRetryDelayMs?: number;
   onCaseStart?: (fixture: LiveEvaluationFixture, index: number) => void;
   onCaseDone?: (report: LiveCaseReport, index: number) => void;
 }
@@ -352,11 +369,27 @@ export class LiveReviewEvaluator {
       const severityFloor = severityFloorForRound(
         fixture.input.priorReviewRoundCount,
       );
-      const diagnostics = await engine.reviewWithDiagnostics({
-        ...(fixture.input as ReviewEngineInput),
-        publishableFindingTypes: ["bug", "safe_suggestion"],
-        severityFloor,
-      });
+      const run = () =>
+        engine.reviewWithDiagnostics({
+          ...(fixture.input as ReviewEngineInput),
+          publishableFindingTypes: ["bug", "safe_suggestion"],
+          severityFloor,
+        });
+      let diagnostics: Awaited<ReturnType<typeof run>>;
+      try {
+        diagnostics = await run();
+      } catch (error) {
+        // Infrastructure noise (model server restarts) must not be scored
+        // as a review failure; retry such a case once.
+        if (!isTransportError(error)) {
+          throw error;
+        }
+        await new Promise((resolve) =>
+          setTimeout(resolve, this.#options.transportRetryDelayMs ?? 15_000),
+        );
+        this.#options.usage?.take();
+        diagnostics = await run();
+      }
       const usage = this.#options.usage?.take();
       const findings = applySeverityFloor(diagnostics.result, severityFloor)
         .kept.findings;

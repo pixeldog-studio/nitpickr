@@ -110,3 +110,55 @@ describe("capture references", () => {
     expect(inferStack(["README.md"])).toBe("other");
   });
 });
+
+describe("transport retries", () => {
+  it("retries a case once after a transport failure", async () => {
+    const { LiveReviewEvaluator, isTransportError } = await import(
+      "../../src/eval/live-review-evaluator.js"
+    );
+    expect(isTransportError(new Error("fetch failed"))).toBe(true);
+    expect(
+      isTransportError(new Error("Model response must contain JSON")),
+    ).toBe(false);
+
+    let calls = 0;
+    const report = await new LiveReviewEvaluator({
+      transportRetryDelayMs: 0,
+      model: {
+        async generateStructuredReview() {
+          calls += 1;
+          if (calls === 1) {
+            throw new Error("fetch failed");
+          }
+          return { summary: "ok", findings: [] };
+        },
+      },
+    }).evaluate([
+      {
+        name: "retry",
+        kind: "clean",
+        stack: "typescript",
+        expectedVerdicts: [],
+        expectedFindings: [],
+        input: {
+          changeRequest: { title: "t", number: 1 },
+          files: [
+            {
+              path: "a.ts",
+              additions: 1,
+              deletions: 0,
+              patch: "@@ -0,0 +1 @@\n+x",
+            },
+          ],
+          instructionText: "",
+          memory: [],
+          commentBudget: 5,
+          priorReviewRoundCount: 0,
+        },
+      },
+    ]);
+
+    expect(calls).toBe(2);
+    expect(report.cases[0]?.error).toBeNull();
+  });
+});
