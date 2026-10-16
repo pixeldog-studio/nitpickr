@@ -349,7 +349,8 @@ export class LiveReviewEvaluator {
     engine: ReviewEngine,
     fixture: LiveEvaluationFixture,
   ): Promise<LiveCaseReport> {
-    const startedAt = process.hrtime.bigint();
+    // Reset on a transport retry so latency measures the successful run.
+    let startedAt = process.hrtime.bigint();
     const elapsedMs = () =>
       Number((process.hrtime.bigint() - startedAt) / 1_000_000n);
     this.#options.usage?.take();
@@ -388,6 +389,7 @@ export class LiveReviewEvaluator {
           setTimeout(resolve, this.#options.transportRetryDelayMs ?? 15_000),
         );
         this.#options.usage?.take();
+        startedAt = process.hrtime.bigint();
         diagnostics = await run();
       }
       const usage = this.#options.usage?.take();
@@ -493,7 +495,15 @@ function sum(cases: LiveCaseReport[], pick: (entry: LiveCaseReport) => number) {
   return cases.reduce((total, entry) => total + pick(entry), 0);
 }
 
-export function summarizeCases(cases: LiveCaseReport[]): LiveEvaluationTotals {
+/**
+ * Ratios use only cases that completed: a failed case has no findings, so
+ * counting it would make precision and false positives look better during a
+ * model-server outage. `failedCases` reports how many were left out.
+ */
+export function summarizeCases(
+  allCases: LiveCaseReport[],
+): LiveEvaluationTotals {
+  const cases = allCases.filter((entry) => entry.error === null);
   const expected = sum(
     cases,
     (entry) => entry.matched.length + entry.missed.length,
@@ -505,8 +515,8 @@ export function summarizeCases(cases: LiveCaseReport[]): LiveEvaluationTotals {
   const verdictsExpected = sum(cases, (entry) => entry.verdictsExpected);
   const sawTokens = cases.some((entry) => entry.promptTokens !== null);
   return {
-    cases: cases.length,
-    failedCases: cases.filter((entry) => entry.error !== null).length,
+    cases: allCases.length,
+    failedCases: allCases.length - cases.length,
     expected,
     matched,
     published,
