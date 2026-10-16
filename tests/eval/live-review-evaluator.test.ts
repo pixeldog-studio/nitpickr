@@ -111,20 +111,22 @@ describe("LiveReviewEvaluator", () => {
               path: "src/a.ts",
               line: 6,
               findingType: "bug",
-              severity: "low",
-              category: "style",
-              title: "Naming",
-              body: "Rename x.",
-              fixPrompt: "Rename.",
+              severity: "medium",
+              category: "maintainability",
+              title: "Unclear contract",
+              body: "Callers cannot tell when x is null.",
+              fixPrompt: "Document the null case.",
             },
           ],
         };
       },
     };
 
-    const report = await new LiveReviewEvaluator({ model, usage }).evaluate([
-      fixture,
-    ]);
+    const report = await new LiveReviewEvaluator({
+      model,
+      usage,
+      engineOptions: { requireEvidence: false },
+    }).evaluate([fixture]);
 
     expect(report.cases).toHaveLength(1);
     const [entry] = report.cases;

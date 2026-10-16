@@ -7,6 +7,10 @@ export type EvidenceGateReason =
   | "finding_type_not_publishable"
   | "below_severity_floor"
   | "duplicates_open_thread"
+  | "style_category"
+  | "evidence_not_in_code"
+  | "refuted_by_verifier"
+  | "unconfirmed_below_floor"
   | "suppressed_by_feedback";
 
 export interface ReviewFeedbackSignal {
@@ -22,6 +26,8 @@ export interface EvidenceGateRejectedFinding<TFinding> {
   finding: TFinding;
   findingFingerprint: string;
   reasons: EvidenceGateReason[];
+  /** Free-text detail, e.g. the verifier's refutation reason. */
+  detail?: string;
 }
 
 interface GateFinding {
@@ -31,11 +37,47 @@ interface GateFinding {
   severity: "low" | "medium" | "high" | "critical";
   category: string;
   title: string;
+  evidence?: string | undefined;
 }
 
 interface ScopedFile {
   path: string;
   patch: string | null;
+  fileContent?: string | null | undefined;
+}
+
+function normalizeCodeLine(line: string): string {
+  return line
+    .replace(/^[+\- ]/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * True when every non-empty line the model quoted appears in the patch or the
+ * file at HEAD (diff markers and whitespace ignored). Quotes that match
+ * nothing mean the finding describes code that is not there.
+ */
+export function evidenceAppearsInCode(
+  evidence: string,
+  file: ScopedFile,
+): boolean {
+  const haystack = new Set(
+    [file.patch ?? "", file.fileContent ?? ""]
+      .flatMap((text) => text.split("\n"))
+      .map(normalizeCodeLine)
+      .filter((line) => line.length > 0),
+  );
+  const haystackText = [...haystack].join("\n");
+  const quoted = evidence
+    .replace(/^```[\w-]*\n?|```$/g, "")
+    .split("\n")
+    .map(normalizeCodeLine)
+    .filter((line) => line.length > 0 && line !== "...");
+  return (
+    quoted.length > 0 &&
+    quoted.every((line) => haystack.has(line) || haystackText.includes(line))
+  );
 }
 
 function patchIncludesLine(patch: string, line: number): boolean {
@@ -165,20 +207,21 @@ export function gateAndRankFindings<TFinding extends GateFinding>(input: {
    * not to, which is how one PR ended up with contradicting comments.
    */
   openThreads?: Array<{ path: string; line: number; category?: string }>;
+  /** Reject findings whose quoted evidence is missing or not in the code. */
+  requireEvidence?: boolean;
 }): {
   acceptedFindings: TFinding[];
   rejectedFindings: EvidenceGateRejectedFinding<TFinding>[];
 } {
-  const scopedFiles = new Map(
-    input.files.map((file) => [file.path, file.patch]),
-  );
+  const scopedFiles = new Map(input.files.map((file) => [file.path, file]));
   const feedbackSignals = input.feedbackSignals ?? [];
   const rejectedFindings: EvidenceGateRejectedFinding<TFinding>[] = [];
   const acceptedFindings: TFinding[] = [];
 
   for (const finding of input.findings) {
     const reasons: EvidenceGateReason[] = [];
-    const patch = scopedFiles.get(finding.path);
+    const scopedFile = scopedFiles.get(finding.path);
+    const patch = scopedFile === undefined ? undefined : scopedFile.patch;
 
     if (patch === undefined) {
       reasons.push("path_not_in_scope");
@@ -217,6 +260,19 @@ export function gateAndRankFindings<TFinding extends GateFinding>(input: {
       )
     ) {
       reasons.push("duplicates_open_thread");
+    }
+
+    if (finding.category === "style") {
+      reasons.push("style_category");
+    }
+
+    if (
+      input.requireEvidence &&
+      scopedFile !== undefined &&
+      (finding.evidence === undefined ||
+        !evidenceAppearsInCode(finding.evidence, scopedFile))
+    ) {
+      reasons.push("evidence_not_in_code");
     }
 
     if (isSuppressedByFeedback(finding, feedbackSignals)) {

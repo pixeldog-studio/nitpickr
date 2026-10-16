@@ -18,6 +18,7 @@ import {
   severityWeight,
 } from "./evidence-gate.js";
 import { fingerprintFinding } from "./finding-fingerprint.js";
+import { downgradeSeverity, verifyFinding } from "./finding-verifier.js";
 import {
   type PriorThread,
   type PriorThreadVerdict,
@@ -50,6 +51,10 @@ const findingSchema = z.object({
   body: z.string().min(1),
   fixPrompt: z.string().min(1),
   suggestedChange: z.string().min(1).optional(),
+  /** Line(s) the model quoted from the patch as the defect. */
+  evidence: z.string().min(1).optional(),
+  /** Concrete input/state, what happens, what should happen. */
+  failureScenario: z.string().min(1).optional(),
 });
 
 const findingTypeAliasMap: Record<
@@ -71,6 +76,7 @@ const findingTypeAliasMap: Record<
 };
 
 const MAX_SUGGESTED_CHANGE_LINES = 12;
+const MAX_EVIDENCE_CHARACTERS = 1_200;
 const MAX_SUGGESTED_CHANGE_CHARACTERS = 600;
 
 const severityAliasMap: Record<
@@ -299,6 +305,11 @@ function normalizeFinding(value: unknown): ReviewFinding | null {
       : undefined;
   const suggestedChange =
     findingType === "safe_suggestion" ? normalizedSuggestedChange : undefined;
+  const evidence = normalizeString(candidate.evidence)?.slice(
+    0,
+    MAX_EVIDENCE_CHARACTERS,
+  );
+  const failureScenario = normalizeString(candidate.failureScenario);
 
   const parsed = findingSchema.safeParse({
     path,
@@ -310,6 +321,10 @@ function normalizeFinding(value: unknown): ReviewFinding | null {
     body: conciseBody,
     fixPrompt,
     suggestedChange,
+    ...(evidence === undefined ? {} : { evidence }),
+    ...(failureScenario === undefined
+      ? {}
+      : { failureScenario: maybeTrimSentenceCount(failureScenario, 3) }),
   });
 
   return parsed.success ? parsed.data : null;
@@ -581,6 +596,8 @@ const reviewResponseWireSchema = z.strictObject({
       category: findingSchema.shape.category,
       title: z.string(),
       body: z.string(),
+      evidence: z.string(),
+      failureScenario: z.string(),
       fixPrompt: z.string(),
       suggestedChange: z.string().nullable(),
     }),
@@ -678,6 +695,18 @@ export interface ReviewEngineOptions {
   maxTotalCharactersPerChunk?: number;
   /** Max model requests in flight for one review; 1 = strictly sequential. */
   maxConcurrentModelRequests?: number;
+  /**
+   * Reject findings whose quoted `evidence` is missing or does not appear in
+   * the patch/file (default true): it catches findings about code that is
+   * not there, the most common false positive from small models.
+   */
+  requireEvidence?: boolean;
+  /**
+   * Adversarially verify findings that survive the gate, one model call each
+   * and at most `maxFindings` per review. Confirmed findings publish, refuted
+   * ones drop, uncertain ones lose one severity level. Off when null/absent.
+   */
+  verifier?: { maxFindings: number } | null;
 }
 
 export const DEFAULT_MAX_PATCH_CHARACTERS_PER_CHUNK = 16_000;
@@ -857,6 +886,8 @@ export class ReviewEngine {
   readonly #maxPatchCharactersPerChunk: number;
   readonly #maxTotalCharactersPerChunk: number;
   readonly #maxConcurrentModelRequests: number;
+  readonly #requireEvidence: boolean;
+  readonly #verifier: { maxFindings: number } | null;
 
   constructor(model: ReviewModel, options: ReviewEngineOptions = {}) {
     this.#model = model;
@@ -871,6 +902,72 @@ export class ReviewEngine {
     this.#maxConcurrentModelRequests =
       options.maxConcurrentModelRequests ??
       DEFAULT_MAX_CONCURRENT_MODEL_REQUESTS;
+    this.#requireEvidence = options.requireEvidence ?? true;
+    this.#verifier = options.verifier ?? null;
+  }
+
+  /**
+   * Verify gated findings in rank order until the comment budget is filled.
+   * Returns the findings to publish and the ones the verifier removed.
+   */
+  async #verify(
+    findings: ReviewFinding[],
+    input: ReviewEngineInput,
+  ): Promise<{
+    kept: ReviewFinding[];
+    rejected: EvidenceGateRejectedFinding<ReviewFinding>[];
+  }> {
+    const verifier = this.#verifier;
+    if (verifier === null) {
+      return { kept: findings, rejected: [] };
+    }
+    const filesByPath = new Map(input.files.map((file) => [file.path, file]));
+    const floor = input.severityFloor ?? null;
+    const kept: ReviewFinding[] = [];
+    const rejected: EvidenceGateRejectedFinding<ReviewFinding>[] = [];
+    let calls = 0;
+    for (const finding of findings) {
+      if (kept.length >= input.commentBudget) {
+        break;
+      }
+      const file = filesByPath.get(finding.path);
+      const outcome =
+        file !== undefined && calls < verifier.maxFindings
+          ? await verifyFinding(this.#model, finding, file)
+          : { verdict: "uncertain" as const, reason: "not verified" };
+      calls += file === undefined ? 0 : 1;
+      if (outcome.verdict === "confirmed") {
+        kept.push(finding);
+        continue;
+      }
+      if (outcome.verdict === "refuted") {
+        rejected.push({
+          finding,
+          findingFingerprint: fingerprintFinding(finding),
+          reasons: ["refuted_by_verifier"],
+          detail: outcome.reason,
+        });
+        continue;
+      }
+      const downgraded = {
+        ...finding,
+        severity: downgradeSeverity(finding.severity),
+      };
+      if (
+        floor !== null &&
+        severityWeight(downgraded.severity) < severityWeight(floor)
+      ) {
+        rejected.push({
+          finding,
+          findingFingerprint: fingerprintFinding(finding),
+          reasons: ["unconfirmed_below_floor"],
+          detail: outcome.reason,
+        });
+        continue;
+      }
+      kept.push(downgraded);
+    }
+    return { kept, rejected };
   }
 
   async #reviewInternal(input: ReviewEngineInput): Promise<{
@@ -1049,6 +1146,7 @@ export class ReviewEngine {
     const gatedFindings = gateAndRankFindings({
       findings: reviewed.result.findings,
       files: input.files,
+      requireEvidence: this.#requireEvidence,
       ...(openThreads.length === 0 ? {} : { openThreads }),
       ...(input.severityFloor === undefined
         ? {}
@@ -1061,12 +1159,17 @@ export class ReviewEngine {
         : { publishableFindingTypes: input.publishableFindingTypes }),
     });
 
+    const verified = await this.#verify(gatedFindings.acceptedFindings, input);
+
     return {
       result: {
         ...reviewed.result,
-        findings: gatedFindings.acceptedFindings.slice(0, input.commentBudget),
+        findings: verified.kept.slice(0, input.commentBudget),
       },
-      rejectedFindings: gatedFindings.rejectedFindings,
+      rejectedFindings: [
+        ...gatedFindings.rejectedFindings,
+        ...verified.rejected,
+      ],
       promptUsage: reviewed.promptUsage,
     };
   }

@@ -25,6 +25,8 @@ export const DEFAULT_EMBEDDING_DIMENSIONS = 768;
 export const DEFAULT_MODEL_REQUEST_TIMEOUT_MS = 300_000;
 export const DEFAULT_MODEL_MAX_CONCURRENT_REQUESTS = 4;
 export const DEFAULT_REVIEW_CHUNK_MAX_TOTAL_CHARS = 200_000;
+/** Findings adversarially verified per review (one model call each). */
+export const DEFAULT_VERIFIER_MAX_FINDINGS = 6;
 
 const bootstrapEnvironmentSchema = z.object({
   NODE_ENV: nodeEnvironmentSchema.optional(),
@@ -41,6 +43,7 @@ const bootstrapEnvironmentSchema = z.object({
   NITPICKR_EMBEDDING_DIMENSIONS: z.string().optional(),
   NITPICKR_MODEL_MAX_CONCURRENT_REQUESTS: z.string().optional(),
   NITPICKR_REVIEW_CHUNK_MAX_TOTAL_CHARS: z.string().optional(),
+  NITPICKR_VERIFIER_MAX_FINDINGS: z.string().optional(),
   GITHUB_API_BASE_URL: z.string().url().optional(),
   GITHUB_BOT_LOGINS: z.string().min(1).optional(),
   NITPICKR_BASE_URL: z.string().url().optional(),
@@ -101,6 +104,8 @@ export interface ModelSettings {
   maxConcurrentRequests: number;
   /** Total prompt characters (patch + file content) packed per review chunk. */
   reviewChunkMaxTotalChars: number;
+  /** null = verifier off (`NITPICKR_VERIFIER_MAX_FINDINGS=off`). */
+  verifierMaxFindings: number | null;
 }
 
 export interface BootstrapConfig {
@@ -298,6 +303,14 @@ function parseModelSettings(parsed: BootstrapEnvironment): ModelSettings {
       "NITPICKR_REVIEW_CHUNK_MAX_TOTAL_CHARS",
       DEFAULT_REVIEW_CHUNK_MAX_TOTAL_CHARS,
     ),
+    verifierMaxFindings:
+      parsed.NITPICKR_VERIFIER_MAX_FINDINGS?.trim().toLowerCase() === "off"
+        ? null
+        : parseInteger(
+            parsed.NITPICKR_VERIFIER_MAX_FINDINGS,
+            "NITPICKR_VERIFIER_MAX_FINDINGS",
+            DEFAULT_VERIFIER_MAX_FINDINGS,
+          ),
   };
 }
 

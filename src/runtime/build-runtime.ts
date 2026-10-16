@@ -171,6 +171,10 @@ export function buildRuntime(
       {
         maxConcurrentModelRequests: models.maxConcurrentRequests,
         maxTotalCharactersPerChunk: models.reviewChunkMaxTotalChars,
+        verifier:
+          models.verifierMaxFindings === null
+            ? null
+            : { maxFindings: models.verifierMaxFindings },
       },
     );
     const memoryClassifier = new ChatMemoryClassifier({

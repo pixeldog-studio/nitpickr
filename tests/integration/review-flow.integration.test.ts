@@ -614,6 +614,7 @@ function createHarness() {
   });
   const reviewModel = new CapturingReviewModel();
   const reviewEngine = new ReviewEngine(reviewModel, {
+    requireEvidence: false,
     maxPatchCharactersPerChunk: 2000,
   });
   const publishClient = new CapturingPublishClient();

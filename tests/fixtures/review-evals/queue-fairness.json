@@ -54,7 +54,8 @@
           "category": "correctness",
           "title": "Stable ordering breaks",
           "body": "Stable ordering breaks when equal priorities are inserted.",
-          "fixPrompt": "In `src/queue/queue-scheduler.ts` around line 12, preserve insertion order for equal priorities."
+          "fixPrompt": "In `src/queue/queue-scheduler.ts` around line 12, preserve insertion order for equal priorities.",
+          "evidence": "new alpha"
         },
         {
           "path": "src/queue/queue-scheduler.ts",

@@ -83,6 +83,10 @@ async function main(): Promise<void> {
         engineOptions: {
           maxConcurrentModelRequests: bootstrap.models.maxConcurrentRequests,
           maxTotalCharactersPerChunk: bootstrap.models.reviewChunkMaxTotalChars,
+          verifier:
+            bootstrap.models.verifierMaxFindings === null
+              ? null
+              : { maxFindings: bootstrap.models.verifierMaxFindings },
         },
         startedAt: new Date().toISOString(),
         ...(flagString(args, "commit")

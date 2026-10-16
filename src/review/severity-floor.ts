@@ -6,8 +6,7 @@
 // we apply a hard floor below which findings are dropped before publishing.
 //
 // Schedule (priorReviewRoundCount = number of *prior* completed runs):
-//   0 or 1 → no floor (full output)
-//   2 or 3 → drop "low"
+//   0 to 3 → drop "low" (nitpicks belong in linters, not review comments)
 //   ≥ 4   → drop "low" and "medium"
 //
 // This module is consumed by both the prompt builder (so the LLM can
@@ -30,10 +29,7 @@ export function severityFloorForRound(
   if (priorReviewRoundCount >= 4) {
     return "high";
   }
-  if (priorReviewRoundCount >= 2) {
-    return "medium";
-  }
-  return null;
+  return "medium";
 }
 
 export interface SeverityFloorPartition {

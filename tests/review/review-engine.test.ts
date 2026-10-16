@@ -305,7 +305,7 @@ describe("ReviewEngine", () => {
       },
     ]);
 
-    const engine = new ReviewEngine(model);
+    const engine = new ReviewEngine(model, { requireEvidence: false });
     const result = await engine.reviewWithDiagnostics({
       changeRequest: {
         title: "Improve queue fairness",
@@ -383,7 +383,9 @@ describe("ReviewEngine", () => {
       },
     ]);
 
-    const result = await new ReviewEngine(model).reviewWithDiagnostics({
+    const result = await new ReviewEngine(model, {
+      requireEvidence: false,
+    }).reviewWithDiagnostics({
       changeRequest: { title: "Queue", number: 7 },
       scope: "commit_delta",
       files: [

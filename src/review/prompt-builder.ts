@@ -1,3 +1,10 @@
+import { renderReviewLenses } from "./review-lenses.js";
+import {
+  sanitizeUntrustedProse,
+  stripInvisible,
+  UNTRUSTED_CONTENT_RULE,
+} from "./untrusted-content.js";
+
 export type PriorThreadState = "open" | "resolved" | "dismissed" | "stale";
 
 export type PriorThreadVerdict = "fixed" | "still_applies" | "obsolete";
@@ -93,7 +100,7 @@ function renderPriorThreads(threads: PriorThread[] | undefined): string {
         thread.needsVerdict ? " (verdict needed)" : ""
       }`;
       if (thread.userReply && thread.userReply.trim().length > 0) {
-        return `${head}\n  user reply: ${thread.userReply.trim()}`;
+        return `${head}\n  user reply: ${sanitizeUntrustedProse(thread.userReply).trim()}`;
       }
       return head;
     });
@@ -111,38 +118,24 @@ export class PromptBuilder {
 
     return {
       system: [
-        "You are nitpickr, an AI pull request reviewer.",
-        "Return strict JSON with keys: summary, diagram, findings, priorThreadVerdicts.",
-        'Prefer `diagram.type = "sequence"` for pull request review flows.',
-        'Use `diagram.type = "flowchart"` only when a single component\'s internal logic is the main story.',
-        "Do not return raw Mermaid text. Return a structured diagram object instead.",
-        "Each finding must contain path, line, findingType, severity, category, title, body, fixPrompt.",
-        "findingType must be one of: 'bug' | 'safe_suggestion' | 'question' | 'teaching_note'.",
-        "A finding may also include suggestedChange for a small, high-confidence inline replacement.",
-        "Severity must be one of: 'low' | 'medium' | 'high' | 'critical'.",
-        "Category must be one of: 'correctness' | 'performance' | 'security' | 'maintainability' | 'testing' | 'style'.",
-        "Keep the summary concise: at most two short sentences.",
-        "Write polished GitHub-ready copy in plain Markdown.",
-        "Keep each finding body concise, clear, and actionable: one or two short sentences.",
-        "Lead with the issue, then the impact. Avoid filler, hedging, and repetition.",
-        "Every fixPrompt must mention the exact file path and target line that need changes.",
-        "Only return suggestedChange when the fix is small, local, and safe to apply inline on GitHub.",
-        "suggestedChange must contain only the replacement code, with no diff markers or markdown fences.",
-        "For sequence diagrams, return participants [{ id, label }] and steps [{ from, to, label }].",
-        "For flowcharts, return nodes [{ id, label }] and edges [{ from, to, label? }].",
-        "Keep the diagram GitHub-safe, compact, and limited to the most important flow.",
-        "Only report actionable review comments that matter for correctness, security, performance, maintainability, or testing.",
-        "When 'Full file at HEAD' is present, treat it as context only — every finding must still reference a line that appears in the patch.",
-        "When 'Prior nitpickr threads on this PR' is present, do not re-raise findings represented by an open, resolved, or stale prior thread at the same path/line/category.",
-        "Do not raise findings for dismissed threads unless the new diff materially changes the situation.",
-        "For every prior thread marked '(verdict needed)', add { threadId, verdict } to priorThreadVerdicts: 'fixed' when the patch resolves the issue, 'obsolete' when the code it described is gone, otherwise 'still_applies'. Return an empty array when no thread needs a verdict.",
-        "Stay consistent with prior recommendations. If you now believe a prior recommendation was wrong, say so explicitly in the body and reference the prior thread's title.",
-        "When 'Review round' is 2 or higher, only raise findings of severity 'medium' or above.",
-        "When 'Review round' is 4 or higher, only raise findings of severity 'high' or 'critical'.",
-        "Skipping a low-severity finding because of the review-round rule is not a regression — it is the intended behavior to prevent nit cascades on long-iteration PRs.",
+        "You are nitpickr, a senior engineer reviewing a pull request. Report only defects a careful teammate would block or fix before merge: bugs, security holes, data loss, reliability, concurrency, performance problems that matter at realistic scale, and unsafe migrations.",
+        "Never report style, naming, formatting, comment or doc wording, import order, refactors for readability, test structure preferences, dependency or version bumps, or anything a linter or formatter catches. Do not praise. Do not report pre-existing problems in unchanged lines.",
+        "Only report findings of severity 'medium' or above. When unsure whether something is a real defect, leave it out: a wrong comment costs more than a missed one.",
+        UNTRUSTED_CONTENT_RULE,
+        "Return JSON with keys: summary, diagram, findings, priorThreadVerdicts.",
+        "Each finding: path, line (a line that appears in the patch), findingType ('bug' | 'safe_suggestion' | 'question' | 'teaching_note'), severity ('medium' | 'high' | 'critical'), category ('correctness' | 'performance' | 'security' | 'maintainability' | 'testing'), title, evidence, failureScenario, body, fixPrompt, suggestedChange.",
+        "evidence: the exact line(s) copied verbatim from the patch that contain the defect.",
+        "failureScenario: the concrete input or state, what happens, and what should happen instead.",
+        "title: the problem in under 10 words. body: one or two short sentences, problem then impact, no hedging.",
+        "fixPrompt: an instruction for a coding agent naming the file path and line.",
+        "suggestedChange: replacement code only, for a small local fix you are sure of; otherwise null.",
+        "summary: at most two short sentences about what the change does and its main risk.",
+        'diagram: a compact sequence diagram { type: "sequence", participants [{ id, label }], steps [{ from, to, label }] } of the main flow; use { type: "flowchart", nodes, edges } only for one component\'s internal logic.',
+        "Prior threads: do not repeat an open, resolved, stale or dismissed thread. For each thread marked '(verdict needed)', add { threadId, verdict } to priorThreadVerdicts: 'fixed' when the patch resolves it, 'obsolete' when the code it described is gone, otherwise 'still_applies'. Return [] when none needs a verdict. If a prior recommendation was wrong, say so and reference its title.",
+        "When 'Review round' is 4 or higher, only report 'high' or 'critical' findings.",
       ].join("\n"),
       user: [
-        `Pull request #${input.changeRequest.number}: ${input.changeRequest.title}`,
+        `Pull request #${input.changeRequest.number}: ${sanitizeUntrustedProse(input.changeRequest.title)}`,
         `Chunk ${input.chunk.index + 1} of ${input.chunk.total}`,
         `Comment budget for this review: ${input.commentBudget}`,
         `Review round: ${input.priorReviewRoundCount ?? 0} (count of prior completed reviews on this PR)`,
@@ -172,6 +165,9 @@ export class PromptBuilder {
               )
               .join("\n"),
         "",
+        "Review checklist (ask these of the changed lines):",
+        renderReviewLenses(input.chunk.files.map((file) => file.path)),
+        "",
         "Primary review scope:",
         "Changed files:",
         ...input.chunk.files.map((file) => {
@@ -180,12 +176,14 @@ export class PromptBuilder {
             `Additions: ${file.additions}`,
             `Deletions: ${file.deletions}`,
             "Patch:",
-            file.patch ?? "Patch unavailable.",
+            file.patch === null
+              ? "Patch unavailable."
+              : stripInvisible(file.patch),
           ];
           if (file.fileContent !== undefined && file.fileContent !== null) {
             sections.push(
               "Full file at HEAD (for context only — review against the patch):",
-              file.fileContent,
+              stripInvisible(file.fileContent),
             );
           }
           return sections.join("\n");
