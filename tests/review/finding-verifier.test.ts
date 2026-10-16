@@ -96,6 +96,7 @@ describe("decideVerification", () => {
     expect(refuted).toEqual({
       verdict: "refuted",
       reason: "line 2 returns early when user is missing",
+      confidence: "high",
     });
     expect(
       decideVerification(

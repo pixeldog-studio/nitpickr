@@ -56,6 +56,14 @@ const findingSchema = z.object({
   evidence: z.string().min(1).optional(),
   /** Concrete input/state, what happens, what should happen. */
   failureScenario: z.string().min(1).optional(),
+  /** What the adversarial verifier decided; for logs and eval reports. */
+  verification: z
+    .object({
+      verdict: z.enum(["confirmed", "refuted", "uncertain", "unverified"]),
+      confidence: z.enum(["low", "medium", "high"]).optional(),
+      reason: z.string(),
+    })
+    .optional(),
 });
 
 const findingTypeAliasMap: Record<
@@ -969,7 +977,7 @@ export class ReviewEngine {
       if (outcome.verdict === "confirmed" || outcome.verdict === "unverified") {
         // Unverified (cap reached or the verifier failed) is not evidence
         // against the finding: publish it as the reviewer rated it.
-        kept.push(finding);
+        kept.push({ ...finding, verification: outcome });
         continue;
       }
       if (
@@ -981,6 +989,7 @@ export class ReviewEngine {
         kept.push({
           ...finding,
           severity: downgradeSeverity(finding.severity),
+          verification: outcome,
         });
         continue;
       }
@@ -1009,7 +1018,7 @@ export class ReviewEngine {
         });
         continue;
       }
-      kept.push(downgraded);
+      kept.push({ ...downgraded, verification: outcome });
     }
     return { kept, rejected };
   }

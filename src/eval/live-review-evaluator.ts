@@ -159,6 +159,7 @@ export interface LiveCaseReport {
       | "findingType"
       | "title"
       | "body"
+      | "verification"
     >
   >;
   error: string | null;
@@ -465,6 +466,9 @@ export class LiveReviewEvaluator {
           findingType: finding.findingType,
           title: finding.title,
           body: finding.body,
+          ...(finding.verification
+            ? { verification: finding.verification }
+            : {}),
         })),
         error: null,
       };

@@ -77,6 +77,8 @@ export interface VerificationOutcome {
   verdict: VerifierVerdict;
   /** Why the outcome was decided, for logs and eval reports. */
   reason: string;
+  /** The verifier's self-reported confidence, when it answered. */
+  confidence?: "low" | "medium" | "high";
 }
 
 /** Lines of file shown around the finding when the file is too large. */
@@ -166,6 +168,9 @@ export function decideVerification(
     return { verdict: "unverified", reason: "unparseable verifier reply" };
   }
   const response = parsed.data;
+  const outcome = (
+    result: Omit<VerificationOutcome, "confidence">,
+  ): VerificationOutcome => ({ ...result, confidence: response.confidence });
   const quotes = response.quotedLines.filter((line) => line.trim().length > 0);
   // evidenceAppearsInCode strips the "12: " prefixes the verifier is shown,
   // on every line of a multi-line quote.
@@ -177,27 +182,36 @@ export function decideVerification(
     // A refutation deletes a finding, so it must be as grounded as a
     // confirmation: a reason and quotes that exist in the code.
     if (response.refutationReason.trim().length === 0) {
-      return { verdict: "uncertain", reason: "refuted without a reason" };
+      return outcome({
+        verdict: "uncertain",
+        reason: "refuted without a reason",
+      });
     }
     return quotesMatch
-      ? { verdict: "refuted", reason: response.refutationReason.trim() }
-      : {
+      ? outcome({
+          verdict: "refuted",
+          reason: response.refutationReason.trim(),
+        })
+      : outcome({
           verdict: "uncertain",
           reason: `refutation quoted code not found: ${response.refutationReason.trim()}`,
-        };
+        });
   }
   if (response.verdict === "confirmed") {
     return quotesMatch
-      ? {
+      ? outcome({
           verdict: "confirmed",
           reason: response.failureScenario.trim() || "confirmed",
-        }
-      : { verdict: "uncertain", reason: "confirmation quoted code not found" };
+        })
+      : outcome({
+          verdict: "uncertain",
+          reason: "confirmation quoted code not found",
+        });
   }
-  return {
+  return outcome({
     verdict: "uncertain",
     reason: response.refutationReason.trim() || "verifier uncertain",
-  };
+  });
 }
 
 export async function verifyFinding(
