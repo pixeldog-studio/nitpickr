@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import {
+  classifyInteraction,
   GitHubAdapter,
   type GitHubApiClient,
 } from "../../src/providers/github/github-adapter.js";
@@ -630,10 +631,10 @@ describe("GitHubAdapter", () => {
       expect.objectContaining({
         kind: "interaction_requested",
         pullNumber: 42,
-        command: "fix",
+        command: "ask",
         replyTargetCommentId: 6001,
         source: expect.objectContaining({
-          argumentText: "add an explicit guard before parsing",
+          argumentText: "fix add an explicit guard before parsing",
         }),
       }),
     );
@@ -916,5 +917,59 @@ describe("GitHubAdapter", () => {
       kind: "ignored",
       reason: "Unsupported pull_request payload.",
     });
+  });
+});
+
+describe("classifyInteraction", () => {
+  const bots = ["nitpickrai"];
+  it.each([
+    ["@nitpickrai why", false, "why", null],
+    [
+      "@nitpickrai why does the retry sleep 5s?",
+      false,
+      "ask",
+      "why does the retry sleep 5s?",
+    ],
+    [
+      "@nitpickrai help me understand the queue",
+      false,
+      "ask",
+      "help me understand the queue",
+    ],
+    [
+      "@nitpickrai learn prefer explicit guards in API handlers",
+      false,
+      "learn",
+      "prefer explicit guards in API handlers",
+    ],
+    ["@nitpickrai", false, "help", null],
+    [
+      "In retry.ts:\n@nitpickrai is this safe?",
+      false,
+      "ask",
+      "In retry.ts:\nis this safe?",
+    ],
+    [
+      "Why is this a problem? input is validated upstream",
+      true,
+      "ask",
+      "Why is this a problem? input is validated upstream",
+    ],
+    ["reconsider", true, "reconsider", null],
+  ])("%s", (body, inThread, command, argumentText) => {
+    expect(classifyInteraction(body, bots, { inThread })).toEqual({
+      command,
+      argumentText,
+    });
+  });
+
+  it.each([
+    ["Thanks @nitpickrai!", false],
+    ["> @nitpickrai why\nagreed with the above", false],
+    ["```\n@nitpickrai review\n```", false],
+    ["@alice can you take this?", true],
+    ["thanks, done", true],
+  ])("ignores %s", (body, inThread) => {
+    expect(classifyInteraction(body, bots, { inThread })).toBeNull();
   });
 });

@@ -63,6 +63,7 @@ const issueCommentEventSchema = z.object({
     user: z.object({
       login: z.string().min(1),
     }),
+    author_association: z.string().optional(),
   }),
 });
 
@@ -84,6 +85,7 @@ const pullRequestReviewCommentEventSchema = z.object({
     user: z.object({
       login: z.string().min(1),
     }),
+    author_association: z.string().optional(),
   }),
 });
 
@@ -223,11 +225,6 @@ export interface GitHubApiClient {
 }
 
 type NormalizedReviewMode = "quick" | "full" | "summary";
-
-interface ParsedInteractionCommand {
-  command: ReviewerChatCommand;
-  argumentText: string | null;
-}
 
 const manualCommandDefinitions: Array<{
   canonicalCommand:
@@ -441,56 +438,97 @@ function parseManualCommand(
   };
 }
 
-function parseInteractionCommand(
-  body: string,
-  botLogins: string[],
-  input: {
-    requireMention: boolean;
-  },
-): ParsedInteractionCommand | null {
-  const normalized = body.trim().toLowerCase().replace(/\s+/g, " ");
-  const mentionCommand = extractMentionCommand(normalized, botLogins);
-  const rawCommandText =
-    mentionCommand ??
-    (input.requireMention ? null : normalized.replace(/^\/+/, "").trim());
-  const canonicalCommand = canonicalizeCommand(rawCommandText);
+/**
+ * Who may spend model time and write repo memory. Missing association (old
+ * payloads, tests) is treated as trusted; GitHub always sends it.
+ */
+const TRUSTED_AUTHOR_ASSOCIATIONS = new Set([
+  "OWNER",
+  "MEMBER",
+  "COLLABORATOR",
+]);
 
-  if (!canonicalCommand) {
-    return null;
-  }
-
-  const match = new RegExp(
-    `^(${interactionCommands.join("|")})(?:_+(.+))?$`,
-  ).exec(canonicalCommand);
-  if (!match?.[1]) {
-    return null;
-  }
-
-  const argumentText =
-    rawCommandText
-      ?.slice(match[1].length)
-      .trim()
-      .replace(/^[:,-]\s*/, "") ?? "";
-
-  return {
-    command: match[1] as ReviewerChatCommand,
-    argumentText: argumentText.length > 0 ? argumentText : null,
-  };
+function isTrustedAuthor(association: string | undefined): boolean {
+  return (
+    association === undefined ||
+    TRUSTED_AUTHOR_ASSOCIATIONS.has(association.toUpperCase())
+  );
 }
 
-/** Text after the bot mention, original case preserved. */
-function extractMentionText(body: string, botLogins: string[]): string | null {
-  for (const botLogin of botLogins) {
-    const escaped = botLogin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const match = new RegExp(
-      `(?:^|\\s)@${escaped}\\b[\\s:,-]*([\\s\\S]+)`,
-      "i",
-    ).exec(body.trim());
-    if (match?.[1]?.trim()) {
-      return match[1].trim();
+/** Text a person wrote to the bot: no quoted replies, no code blocks. */
+function visibleText(body: string): string {
+  return body
+    .replace(/```[\s\S]*?```/g, " ")
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith(">"))
+    .join("\n")
+    .trim();
+}
+
+const STANDALONE_COMMANDS = new Set([
+  "why",
+  "teach",
+  "fix",
+  "reconsider",
+  "status",
+  "help",
+]);
+const ACKNOWLEDGEMENT =
+  /^(?:(?:thanks|thank you|thx|ty|done|fixed|ok|okay|lgtm|sounds good|will do|👍|🙏)[\s.,!]*)+$/iu;
+
+/**
+ * Decide whether a comment is addressed to nitpickr and what it asks for.
+ * A command word only counts on its own (`why`, `learn <preference>`);
+ * anything else, and anything with a question mark, is a question.
+ * - PR conversation: the bot must be mentioned at the start of a line.
+ * - Replies in a thread: addressed to the thread unless they mention
+ *   someone else; plain acknowledgements are not answered.
+ */
+export function classifyInteraction(
+  body: string,
+  botLogins: string[],
+  input: { inThread: boolean },
+): { command: ReviewerChatCommand; argumentText: string | null } | null {
+  const text = visibleText(body);
+  const handles = botLogins.map((login) =>
+    login.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+  );
+  const mention = new RegExp(
+    `(^|\\n)\\s*@(?:${handles.join("|")})\\b[\\s:,-]*`,
+    "i",
+  );
+  let addressed: string;
+  if (mention.test(text)) {
+    addressed = text.replace(mention, "$1").trim();
+  } else if (input.inThread) {
+    if (/(^|\s)@[a-z0-9-]+/i.test(text) || ACKNOWLEDGEMENT.test(text)) {
+      return null;
+    }
+    addressed = text;
+  } else {
+    return null;
+  }
+  if (addressed.length === 0) {
+    return { command: "help", argumentText: null };
+  }
+
+  const [firstWord = "", ...rest] = addressed.split(/\s+/);
+  const word = firstWord.toLowerCase().replace(/^\/+|[:,.!]+$/g, "");
+  const remainder = rest.join(" ").trim();
+  if (!addressed.includes("?")) {
+    if (word === "learn" && remainder.length > 0) {
+      return {
+        command: "learn",
+        argumentText: addressed
+          .slice(firstWord.length)
+          .replace(/^[\s:,-]+/, ""),
+      };
+    }
+    if (STANDALONE_COMMANDS.has(word) && remainder.length === 0) {
+      return { command: word as ReviewerChatCommand, argumentText: null };
     }
   }
-  return null;
+  return { command: "ask", argumentText: addressed };
 }
 
 /** Comments written by nitpickr (or any bot) never trigger a reply. */
@@ -500,23 +538,6 @@ function isBotAuthor(login: string, botLogins: string[]): boolean {
     login.toLowerCase().endsWith("[bot]") ||
     botLogins.some((botLogin) => botLogin.toLowerCase() === normalized)
   );
-}
-
-/**
- * Commands lowercase their text for matching; `learn` and `ask` need the
- * author's original wording back.
- */
-function originalArgumentText(
-  body: string,
-  botLogins: string[],
-  command: string,
-): string | null {
-  const text = extractMentionText(body, botLogins) ?? body.trim();
-  const escaped = command.replace(/_/g, "[\\s_-]+");
-  const stripped = text
-    .replace(new RegExp(`^/?${escaped}\\b[\\s:,-]*`, "i"), "")
-    .trim();
-  return stripped.length > 0 ? stripped : null;
 }
 
 function containsBotMention(body: string, botLogins: string[]): boolean {
@@ -632,6 +653,18 @@ export class GitHubAdapter {
         };
       }
 
+      // Bot authors first: a model answer that happens to contain
+      // "@nitpickr review" must not start a review.
+      if (isBotAuthor(parsed.comment.user.login, this.#botLogins)) {
+        return { kind: "ignored", reason: "Comment was written by a bot." };
+      }
+      if (!isTrustedAuthor(parsed.comment.author_association)) {
+        return {
+          kind: "ignored",
+          reason:
+            "Only repository owners, members and collaborators can use nitpickr commands.",
+        };
+      }
       const command = parseManualCommand(
         parsed.comment.body,
         this.#botLogins,
@@ -652,22 +685,15 @@ export class GitHubAdapter {
         };
       }
 
-      if (isBotAuthor(parsed.comment.user.login, this.#botLogins)) {
-        return { kind: "ignored", reason: "Comment was written by a bot." };
-      }
-      const interaction = parseInteractionCommand(
-        parsed.comment.body,
-        this.#botLogins,
-        {
-          requireMention: true,
-        },
-      );
-      const question =
-        interaction === null
-          ? extractMentionText(parsed.comment.body, this.#botLogins)
-          : null;
-      if (interaction || question) {
-        const command = interaction?.command ?? "ask";
+      // Edits re-send the webhook; answering again would duplicate replies.
+      const interaction =
+        parsed.action === "edited"
+          ? null
+          : classifyInteraction(parsed.comment.body, this.#botLogins, {
+              inThread: false,
+            });
+      if (interaction) {
+        const command = interaction.command;
         return {
           kind: "interaction_requested",
           installationId: String(parsed.installation.id),
@@ -682,13 +708,7 @@ export class GitHubAdapter {
             kind: "issue_comment",
             commentId: parsed.comment.id,
             body: parsed.comment.body,
-            argumentText:
-              question ??
-              originalArgumentText(
-                parsed.comment.body,
-                this.#botLogins,
-                command,
-              ),
+            argumentText: interaction.argumentText,
           },
         };
       }
@@ -720,17 +740,28 @@ export class GitHubAdapter {
       if (isBotAuthor(parsed.comment.user.login, this.#botLogins)) {
         return { kind: "ignored", reason: "Comment was written by a bot." };
       }
-      // A reply in a thread is addressed to the thread's author. Known
-      // commands run as before; anything else is a question or remark the
-      // worker answers when the thread is nitpickr's.
-      const interaction = parseInteractionCommand(
-        parsed.comment.body,
-        this.#botLogins,
-        {
-          requireMention: false,
-        },
-      );
-      const command = interaction?.command ?? "ask";
+      if (!isTrustedAuthor(parsed.comment.author_association)) {
+        return {
+          kind: "ignored",
+          reason:
+            "Only repository owners, members and collaborators can talk to nitpickr.",
+        };
+      }
+      // A reply in a thread is addressed to the thread's author; the worker
+      // only answers in threads nitpickr started. Edits never re-trigger.
+      const interaction =
+        parsed.action === "edited"
+          ? null
+          : classifyInteraction(parsed.comment.body, this.#botLogins, {
+              inThread: true,
+            });
+      if (!interaction) {
+        return {
+          kind: "ignored",
+          reason: "Reply is not addressed to nitpickr.",
+        };
+      }
+      const command = interaction.command;
 
       return {
         kind: "interaction_requested",
@@ -747,15 +778,7 @@ export class GitHubAdapter {
           kind: "review_comment",
           commentId: parsed.comment.id,
           body: parsed.comment.body,
-          argumentText:
-            interaction === null
-              ? (extractMentionText(parsed.comment.body, this.#botLogins) ??
-                parsed.comment.body.trim())
-              : originalArgumentText(
-                  parsed.comment.body,
-                  this.#botLogins,
-                  command,
-                ),
+          argumentText: interaction.argumentText,
           path: parsed.comment.path ?? null,
           line: parsed.comment.line ?? null,
         },
@@ -782,7 +805,7 @@ export class GitHubAdapter {
     }
 
     const parsed = parsedResult.data;
-    if (!parsed.issue.pull_request) {
+    if (!parsed.issue.pull_request || parsed.action === "edited") {
       return null;
     }
     if (!containsBotMention(parsed.comment.body, this.#botLogins)) {

@@ -110,6 +110,12 @@ function categoryFromFingerprint(
 }
 
 export class ReviewerChatService {
+  readonly #botLogin: string;
+
+  constructor(options: { botLogin?: string } = {}) {
+    this.#botLogin = options.botLogin ?? "nitpickr";
+  }
+
   async respond(input: {
     command: ReviewerChatCommand;
     actorLogin: string;
@@ -126,7 +132,7 @@ export class ReviewerChatService {
     switch (input.command) {
       case "help":
         return {
-          body: renderCommandTips(),
+          body: renderCommandTips(this.#botLogin),
           feedbackEvents: [],
           memoryDiscussions: [],
         };
@@ -136,7 +142,7 @@ export class ReviewerChatService {
         return {
           body:
             "I can't answer free-form questions right now. These commands work:\n\n" +
-            renderCommandTips(),
+            renderCommandTips(this.#botLogin),
           feedbackEvents: [],
           memoryDiscussions: [],
         };

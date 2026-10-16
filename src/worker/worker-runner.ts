@@ -787,7 +787,9 @@ function parseInteractionJobPayload(payload: QueueJob["payload"]): {
     command !== "reconsider" &&
     command !== "fix" &&
     command !== "learn" &&
-    command !== "status"
+    command !== "status" &&
+    command !== "help" &&
+    command !== "ask"
   ) {
     throw new Error("interaction job command is invalid.");
   }
@@ -920,6 +922,8 @@ export interface WorkerRunnerDependencies {
   >;
   reviewPlanner: Pick<ReviewPlanner, "plan">;
   reviewerChatService?: Pick<ReviewerChatService, "respond">;
+  /** Handle shown in command help, e.g. the GitHub App's login. */
+  botLogin?: string;
   /** Model-backed answers for ask/why/teach and verifier-backed reconsider. */
   conversationResponder?: Pick<ConversationResponder, "answer" | "reconsider">;
   reviewLifecycle: Pick<
@@ -980,7 +984,10 @@ export class WorkerRunner {
     this.#feedbackService = input.feedbackService;
     this.#reviewPlanner = input.reviewPlanner;
     this.#reviewerChatService =
-      input.reviewerChatService ?? new ReviewerChatService();
+      input.reviewerChatService ??
+      new ReviewerChatService(
+        input.botLogin ? { botLogin: input.botLogin } : {},
+      );
     this.#conversationResponder = input.conversationResponder ?? null;
     this.#reviewLifecycle = input.reviewLifecycle;
     this.#reviewEngine = input.reviewEngine;
@@ -1905,21 +1912,8 @@ export class WorkerRunner {
         thread: threadContext,
       }));
 
-    if (reply.memoryDiscussions.length > 0) {
-      await this.#memoryService.ingestDiscussion({
-        tenantId: job.tenantId,
-        repositoryId: job.repositoryId,
-        discussions: reply.memoryDiscussions,
-      });
-    }
-    if (this.#feedbackService && reply.feedbackEvents.length > 0) {
-      await this.#feedbackService.recordOutcome({
-        tenantId: job.tenantId,
-        repositoryId: job.repositoryId,
-        events: reply.feedbackEvents,
-      });
-    }
-
+    // Post first: if posting fails the job retries, and recording feedback
+    // or memory before that would count it twice.
     if (payload.source.kind === "issue_comment") {
       if (!this.#githubAdapter.createIssueComment) {
         throw new Error("GitHub issue comment replies are unavailable.");
@@ -1940,6 +1934,21 @@ export class WorkerRunner {
         pullNumber: payload.pullNumber,
         commentId: payload.replyTargetCommentId ?? payload.source.commentId,
         body: reply.body,
+      });
+    }
+
+    if (reply.memoryDiscussions.length > 0) {
+      await this.#memoryService.ingestDiscussion({
+        tenantId: job.tenantId,
+        repositoryId: job.repositoryId,
+        discussions: reply.memoryDiscussions,
+      });
+    }
+    if (this.#feedbackService && reply.feedbackEvents.length > 0) {
+      await this.#feedbackService.recordOutcome({
+        tenantId: job.tenantId,
+        repositoryId: job.repositoryId,
+        events: reply.feedbackEvents,
       });
     }
 
@@ -2013,9 +2022,18 @@ export class WorkerRunner {
             installationId: payload.installationId,
             threadId: input.threadId,
           });
-          await this.#reviewLifecycle.markPublishedCommentsResolved?.([
-            input.threadId,
-          ]);
+          // Bookkeeping only: a failure here must not turn the reply into
+          // the template fallback for a thread that is already resolved.
+          try {
+            await this.#reviewLifecycle.markPublishedCommentsResolved?.([
+              input.threadId,
+            ]);
+          } catch (error) {
+            logger.warn("Failed to mark reconsidered thread resolved.", {
+              jobId: job.id,
+              error: toErrorMessage(error),
+            });
+          }
         }
         logger.info("Reconsidered finding with the verifier.", {
           jobId: job.id,

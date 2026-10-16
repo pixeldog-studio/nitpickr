@@ -111,6 +111,7 @@ async function main(): Promise<void> {
       reviewLifecycle: runtime.reviewLifecycle,
       reviewEngine: operationalRuntime.reviewEngine,
       conversationResponder: operationalRuntime.conversationResponder,
+      botLogin: operationalRuntime.config.github.botLogins[0],
       publisher: operationalRuntime.publisher,
       statusPublisher: operationalRuntime.reviewStatusPublisher,
     });
