@@ -164,7 +164,7 @@ export function gateAndRankFindings<TFinding extends GateFinding>(input: {
    * this close to one repeats it: models re-raise open threads even when told
    * not to, which is how one PR ended up with contradicting comments.
    */
-  openThreads?: Array<{ path: string; line: number }>;
+  openThreads?: Array<{ path: string; line: number; category?: string }>;
 }): {
   acceptedFindings: TFinding[];
   rejectedFindings: EvidenceGateRejectedFinding<TFinding>[];
@@ -211,6 +211,8 @@ export function gateAndRankFindings<TFinding extends GateFinding>(input: {
       (input.openThreads ?? []).some(
         (thread) =>
           thread.path === finding.path &&
+          (thread.category === undefined ||
+            thread.category === finding.category) &&
           Math.abs(thread.line - finding.line) <= OPEN_THREAD_LINE_WINDOW,
       )
     ) {

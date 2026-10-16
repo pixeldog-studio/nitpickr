@@ -177,8 +177,13 @@ function prependMemoryRollup(
 
 function determineReviewScope(
   trigger: ReturnType<typeof parseReviewTrigger>,
+  hasCompletedReview: boolean,
 ): ReviewRun["scope"] {
-  return trigger.type === "pr_synchronized" ? "commit_delta" : "full_pr";
+  // A push with no earlier review (e.g. the opened job never ran) gets the
+  // full-PR review and summary instead of a delta against nothing.
+  return trigger.type === "pr_synchronized" && hasCompletedReview
+    ? "commit_delta"
+    : "full_pr";
 }
 
 function isAutomaticTrigger(
@@ -402,6 +407,7 @@ function buildPriorThreads(input: {
     line: number;
     fingerprint: string;
     isResolved: boolean;
+    isOutdated?: boolean;
     body: string;
     reactionSummary: { positiveCount: number; negativeCount: number };
   }>;
@@ -477,10 +483,13 @@ function buildPriorThreads(input: {
       id: `T${index + 1}`,
       // Only a push (commit delta) can show whether a thread was fixed; a
       // full-PR patch compares against the base, not the earlier review.
+      // An outdated thread means a push rewrote its line: the most common
+      // shape of a fix, so it needs a verdict too.
       needsVerdict:
         input.scope === "commit_delta" &&
         !thread.isResolved &&
-        changedNearThread,
+        reviewedPathSet.has(thread.path) &&
+        (changedNearThread || thread.isOutdated === true),
       path: thread.path,
       line: thread.line,
       state,
@@ -1122,27 +1131,32 @@ export class WorkerRunner {
         throw classifyReviewError("github", error);
       }
       changeRequestContext = context;
+      const latestCompletedReview = this.#reviewLifecycle
+        .getLatestCompletedReview
+        ? await this.#reviewLifecycle.getLatestCompletedReview(
+            context.changeRequest.id,
+          )
+        : null;
       if (
-        payload.headSha !== null &&
-        payload.headSha !== context.changeRequest.headSha
+        payload.trigger.type === "pr_synchronized" &&
+        ((payload.headSha !== null &&
+          payload.headSha !== context.changeRequest.headSha) ||
+          latestCompletedReview?.headSha === context.changeRequest.headSha)
       ) {
-        // A newer push queued its own job; reviewing the new head here would
-        // duplicate that review.
-        logger.info("Skipping review job for an outdated commit.", {
+        // A newer push queued its own job, or this head was already
+        // reviewed (e.g. by the opened job). Full reviews are never skipped:
+        // they review the current head instead.
+        logger.info("Skipping push review that is outdated or already done.", {
           jobId: job.id,
           queuedHeadSha: payload.headSha,
           currentHeadSha: context.changeRequest.headSha,
         });
         return;
       }
-      const reviewScope = determineReviewScope(payload.trigger);
-      const latestCompletedReview =
-        reviewScope === "commit_delta" &&
-        this.#reviewLifecycle.getLatestCompletedReview
-          ? await this.#reviewLifecycle.getLatestCompletedReview(
-              context.changeRequest.id,
-            )
-          : null;
+      const reviewScope = determineReviewScope(
+        payload.trigger,
+        latestCompletedReview !== null,
+      );
       const priorReviewRoundCount = this.#reviewLifecycle.countCompletedReviews
         ? await this.#reviewLifecycle.countCompletedReviews(
             context.changeRequest.id,
@@ -1179,6 +1193,7 @@ export class WorkerRunner {
           changeRequestId:
             job.changeRequestId ?? `${job.repositoryId}:${payload.pullNumber}`,
           headSha: context.changeRequest.headSha,
+          createdBefore: job.createdAt,
         });
       if (supersededCount > 0) {
         logger.info("Superseded queued review jobs for newer head SHA.", {

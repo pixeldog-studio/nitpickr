@@ -250,7 +250,7 @@ describe("WorkerRunner", () => {
     );
   });
 
-  it("skips review jobs queued for a commit that is no longer the head", async () => {
+  it("skips push reviews queued for a commit that is no longer the head", async () => {
     const queue = new FakeQueueScheduler();
     const logger = new FakeLogger();
     const lifecycle = new FakeReviewLifecycleService();
@@ -348,9 +348,106 @@ describe("WorkerRunner", () => {
     expect(lifecycle.started).toEqual([]);
     expect(logger.entries).toContainEqual(
       expect.objectContaining({
-        message: "Skipping review job for an outdated commit.",
+        message: "Skipping push review that is outdated or already done.",
       }),
     );
+  });
+
+  it("still runs a full review whose queued commit is no longer the head", async () => {
+    const queue = new FakeQueueScheduler();
+    const logger = new FakeLogger();
+    const lifecycle = new FakeReviewLifecycleService();
+    queue.nextJobs = [
+      {
+        id: "job_full_outdated",
+        type: "review_requested",
+        tenantId: "github-installation:123456",
+        repositoryId: "github:99",
+        changeRequestId: "github:99:42",
+        dedupeKey: `github:99:42:full:${"a".repeat(40)}`,
+        priority: 50,
+        status: "running",
+        attempts: 0,
+        maxAttempts: 3,
+        payload: {
+          installationId: "123456",
+          repository: { owner: "rubenspessoa", name: "nitpickr" },
+          pullNumber: 42,
+          mode: "full",
+          trigger: { type: "pr_opened", actorLogin: "ruben" },
+          headSha: "a".repeat(40),
+        },
+        createdAt: new Date("2026-03-09T10:00:00.000Z"),
+        scheduledAt: new Date("2026-03-09T10:00:00.000Z"),
+        startedAt: new Date("2026-03-09T10:00:01.000Z"),
+        completedAt: null,
+        workerId: "worker_1",
+        lastError: null,
+      },
+    ];
+
+    const runner = new WorkerRunner({
+      logger,
+      queueScheduler: queue,
+      githubAdapter: {
+        async fetchChangeRequestContext() {
+          return {
+            tenantId: "github-installation:123456",
+            installationId: "123456",
+            repositoryId: "github:99",
+            repository: { owner: "rubenspessoa", name: "nitpickr" },
+            changeRequest: {
+              id: "github:99:42",
+              tenantId: "github-installation:123456",
+              installationId: "123456",
+              repositoryId: "github:99",
+              provider: "github" as const,
+              number: 42,
+              title: "Improve queue fairness",
+              baseSha: "c".repeat(40),
+              headSha: "b".repeat(40),
+              status: "open" as const,
+              authorLogin: "ruben",
+            },
+            files: [],
+            comments: [],
+          };
+        },
+      },
+      instructionBundleLoader: {
+        async loadForReview() {
+          throw new Error("reached instruction loading");
+        },
+      },
+      memoryService: {
+        async getRelevantMemories() {
+          return [];
+        },
+        async ingestDiscussion() {
+          throw new Error("should not ingest");
+        },
+      },
+      reviewPlanner: new FakeReviewPlanner(),
+      reviewLifecycle: lifecycle,
+      reviewEngine: {
+        async review() {
+          throw new Error("should not review");
+        },
+      },
+      publisher: {
+        buildInlineComments() {
+          return [];
+        },
+        async publish() {
+          throw new Error("should not publish");
+        },
+      },
+    });
+
+    await runner.runOnce({ workerId: "worker_1", perTenantCap: 1 });
+
+    // The opened review is not skipped: it reviews the current head.
+    expect(queue.failed[0]?.error).toContain("reached instruction loading");
   });
 
   it("processes review jobs end to end", async () => {

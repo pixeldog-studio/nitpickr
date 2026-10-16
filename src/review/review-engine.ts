@@ -965,7 +965,17 @@ export class ReviewEngine {
           ...prompt,
           jsonSchema: reviewResponseJsonSchema,
         });
-        return modelResponseSchema.parse(response);
+        const parsed = modelResponseSchema.parse(response);
+        // A chunk may only judge threads it was shown.
+        const shownThreadIds = new Set(
+          (chunkPriorThreads ?? []).map((thread) => thread.id),
+        );
+        return {
+          ...parsed,
+          priorThreadVerdicts: parsed.priorThreadVerdicts.filter((entry) =>
+            shownThreadIds.has(entry.threadId),
+          ),
+        };
       },
     );
 
@@ -1028,7 +1038,14 @@ export class ReviewEngine {
         (thread) =>
           thread.state !== "resolved" && !settledThreadIds.has(thread.id),
       )
-      .map((thread) => ({ path: thread.path, line: thread.line }));
+      .map((thread) => {
+        // Fingerprints are path:line:category:title; a new finding of a
+        // different category near an open thread is a different problem.
+        const category = thread.fingerprint.split(":").at(-2);
+        return category
+          ? { path: thread.path, line: thread.line, category }
+          : { path: thread.path, line: thread.line };
+      });
     const gatedFindings = gateAndRankFindings({
       findings: reviewed.result.findings,
       files: input.files,

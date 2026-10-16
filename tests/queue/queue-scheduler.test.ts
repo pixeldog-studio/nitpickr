@@ -304,6 +304,7 @@ describe("QueueScheduler", () => {
       repositoryId: "repo_1",
       changeRequestId: "cr_1",
       headSha: sha.current,
+      createdBefore: new Date("2026-03-09T10:00:00.000Z"),
     });
 
     expect(canceled).toBe(1);

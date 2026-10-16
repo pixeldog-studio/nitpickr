@@ -186,6 +186,7 @@ export interface GitHubApiClient {
       line: number;
       fingerprint: string;
       isResolved: boolean;
+      isOutdated?: boolean;
       body: string;
       reactionSummary: {
         positiveCount: number;
@@ -902,6 +903,7 @@ export class GitHubAdapter {
       line: number;
       fingerprint: string;
       isResolved: boolean;
+      isOutdated?: boolean;
       body: string;
       reactionSummary: {
         positiveCount: number;
