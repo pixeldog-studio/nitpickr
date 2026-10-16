@@ -5,6 +5,7 @@ import {
   toResponseSchema,
 } from "../shared/chat-completion-client.js";
 import { evidenceAppearsInCode, type Severity } from "./evidence-gate.js";
+import type { RelatedSnippet } from "./related-code.js";
 import {
   revealInvisible,
   UNTRUSTED_CONTENT_RULE,
@@ -120,6 +121,7 @@ function fileExcerpt(file: VerifierFile, line: number): string | null {
 export function buildVerifierPrompt(
   finding: VerifiableFinding,
   file: VerifierFile,
+  related: RelatedSnippet[] = [],
 ): { system: string; user: string } {
   const excerpt = fileExcerpt(file, finding.line);
   return {
@@ -136,6 +138,16 @@ export function buildVerifierPrompt(
       excerpt === null
         ? "File at HEAD: unavailable."
         : `File at HEAD (line numbers added):\n${excerpt}`,
+      ...(related.length === 0
+        ? []
+        : [
+            "",
+            "Related code in this PR (definitions and call sites of names used at the flagged lines):",
+            ...related.map(
+              (entry) =>
+                `${entry.path} (${entry.kind} of ${entry.symbol}):\n${revealInvisible(entry.text)}`,
+            ),
+          ]),
     ].join("\n"),
   };
 }
@@ -192,10 +204,11 @@ export async function verifyFinding(
   model: VerifierModel,
   finding: VerifiableFinding,
   file: VerifierFile,
+  related: RelatedSnippet[] = [],
 ): Promise<VerificationOutcome> {
   try {
     const reply = await model.generateStructuredReview({
-      ...buildVerifierPrompt(finding, file),
+      ...buildVerifierPrompt(finding, file, related),
       jsonSchema: verifierResponseJsonSchema,
     });
     return decideVerification(reply, file);

@@ -30,6 +30,7 @@ import {
   type PromptUsageSnapshot,
   type ReviewScope,
 } from "./prompt-payload-optimizer.js";
+import { findRelatedCode } from "./related-code.js";
 
 const defaultMermaidDiagram = renderDiagramSpec(defaultDiagramSpec);
 const defaultSummary = "nitpickr completed the review.";
@@ -957,7 +958,12 @@ export class ReviewEngine {
       const file = filesByPath.get(finding.path);
       const outcome =
         file !== undefined && calls < verifier.maxFindings
-          ? await verifyFinding(this.#model, finding, file)
+          ? await verifyFinding(
+              this.#model,
+              finding,
+              file,
+              findRelatedCode({ finding, files: input.files }),
+            )
           : { verdict: "unverified" as const, reason: "not verified (cap)" };
       calls += file === undefined ? 0 : 1;
       if (outcome.verdict === "confirmed" || outcome.verdict === "unverified") {

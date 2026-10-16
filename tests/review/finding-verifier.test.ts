@@ -161,6 +161,28 @@ describe("verifier helpers", () => {
     expect(prompt.user).toContain("Claim: Any user can delete any account.");
     expect(prompt.user).toContain("3: deleteUser(user.id);");
     expect(prompt.system).toContain("verdict first");
+    const withRelated = buildVerifierPrompt(
+      {
+        path: "src/users.ts",
+        line: 3,
+        severity: "high",
+        title: "Missing ownership check",
+        body: "Any user can delete any account.",
+      },
+      file,
+      [
+        {
+          path: "src/db/users.ts",
+          startLine: 1,
+          kind: "definition",
+          symbol: "deleteUser",
+          text: "1: export function deleteUser(id) {",
+        },
+      ],
+    );
+    expect(withRelated.user).toContain(
+      "src/db/users.ts (definition of deleteUser):",
+    );
   });
 });
 
