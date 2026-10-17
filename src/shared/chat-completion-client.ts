@@ -8,7 +8,7 @@ import {
   isTimeoutError,
 } from "./http-client.js";
 import { normalizeModelBaseUrl } from "./model-base-url.js";
-import { ModelOutputError } from "./model-output.js";
+import { ModelOutputError, TruncatedOutputError } from "./model-output.js";
 
 /**
  * Minimal client for the `/v1/chat/completions` protocol spoken by local
@@ -167,7 +167,7 @@ export class ChatCompletionClient {
         // The tail shows what the model was repeating.
         contentTail: choice.message?.content?.slice(-400) ?? null,
       });
-      throw new ModelOutputError(
+      throw new TruncatedOutputError(
         "Model output hit the token cap before finishing (likely a repetition loop).",
       );
     }

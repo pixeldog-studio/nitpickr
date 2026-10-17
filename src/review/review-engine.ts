@@ -4,6 +4,7 @@ import {
   type ResponseJsonSchema,
   toResponseSchema,
 } from "../shared/chat-completion-client.js";
+import { TruncatedOutputError } from "../shared/model-output.js";
 import {
   type DiagramSpec,
   defaultDiagramSpec,
@@ -62,6 +63,7 @@ const findingSchema = z.object({
       verdict: z.enum(["confirmed", "refuted", "uncertain", "unverified"]),
       confidence: z.enum(["low", "medium", "high"]).optional(),
       reason: z.string(),
+      failed: z.literal(true).optional(),
     })
     .optional(),
 });
@@ -86,6 +88,11 @@ const findingTypeAliasMap: Record<
 
 const MAX_SUGGESTED_CHANGE_LINES = 12;
 const MAX_EVIDENCE_CHARACTERS = 1_200;
+/** Unconfirmed findings listed in the summary, on top of the inline budget. */
+const SECOND_LOOK_MAX_FINDINGS = 5;
+/** Sent on the one retry after a chunk's reply was cut off at the cap. */
+const SHORT_REPLY_NUDGE =
+  "Your previous reply ran past the length limit. Report at most 3 findings, keep every field to one or two sentences, and return a minimal diagram.";
 const MAX_SUGGESTED_CHANGE_CHARACTERS = 600;
 
 const severityAliasMap: Record<
@@ -952,45 +959,102 @@ export class ReviewEngine {
     this.#inlinePolicy = options.inlinePolicy ?? "all";
   }
 
-  #splitByInlinePolicy(findings: ReviewFinding[]): {
-    findings: ReviewFinding[];
-    secondLook?: ReviewFinding[];
-  } {
-    if (this.#inlinePolicy === "all" || this.#verifier === null) {
-      return { findings };
+  /**
+   * One chunk's review. A reply cut off at the output cap (usually a
+   * repetition loop) is retried once with a request for a shorter answer;
+   * if that is cut off too, the chunk is skipped and the summary says so,
+   * instead of failing the whole review and every other chunk with it.
+   */
+  async #generateChunkReview(
+    prompt: { system: string; user: string },
+    files: Array<{ path: string }>,
+  ): Promise<unknown> {
+    const generate = (user: string) =>
+      this.#model.generateStructuredReview({
+        system: prompt.system,
+        user,
+        jsonSchema: reviewResponseJsonSchema,
+      });
+    try {
+      return await generate(prompt.user);
+    } catch (error) {
+      if (!(error instanceof TruncatedOutputError)) {
+        throw error;
+      }
     }
-    const inline = findings.filter(
-      (finding) =>
-        finding.verification === undefined ||
-        finding.verification.verdict === "confirmed" ||
-        finding.verification.verdict === "unverified",
-    );
-    const secondLook = findings.filter((finding) => !inline.includes(finding));
-    return { findings: inline, secondLook };
+    try {
+      return await generate(`${prompt.user}\n\n${SHORT_REPLY_NUDGE}`);
+    } catch (error) {
+      if (!(error instanceof TruncatedOutputError)) {
+        throw error;
+      }
+      const paths = files.map((file) => `\`${file.path}\``);
+      const shown = paths.slice(0, 3).join(", ");
+      const more = paths.length > 3 ? ` and ${paths.length - 3} more` : "";
+      return {
+        summary: `I couldn't review ${shown}${more}: my reply kept running past its length limit.`,
+        findings: [],
+        priorThreadVerdicts: [],
+      };
+    }
   }
 
   /**
-   * Verify gated findings in rank order until the comment budget is filled.
-   * Returns the findings to publish and the ones the verifier removed.
+   * Whether a verified finding becomes an inline comment. Under `confirmed`,
+   * only confirmed findings and ones the cap skipped go inline; a check that
+   * failed (timeout, cut-off reply) must not open the gate, or an unhealthy
+   * model or a reply-looping input would post everything unchecked.
+   */
+  #isInline(finding: ReviewFinding): boolean {
+    const verification = finding.verification;
+    if (this.#inlinePolicy === "all" || verification === undefined) {
+      return true;
+    }
+    return (
+      verification.verdict === "confirmed" ||
+      (verification.verdict === "unverified" && verification.failed !== true)
+    );
+  }
+
+  /**
+   * Verify gated findings in rank order until the inline comments fill the
+   * comment budget. Only inline findings count against it, so unconfirmed
+   * ones listed for a second look never crowd out a confirmed finding
+   * ranked below them.
    */
   async #verify(
     findings: ReviewFinding[],
     input: ReviewEngineInput,
   ): Promise<{
-    kept: ReviewFinding[];
+    inline: ReviewFinding[];
+    secondLook: ReviewFinding[];
     rejected: EvidenceGateRejectedFinding<ReviewFinding>[];
   }> {
     const verifier = this.#verifier;
     if (verifier === null) {
-      return { kept: findings, rejected: [] };
+      return {
+        inline: findings.slice(0, input.commentBudget),
+        secondLook: [],
+        rejected: [],
+      };
     }
+    const inline: ReviewFinding[] = [];
+    const secondLook: ReviewFinding[] = [];
+    const keep = (finding: ReviewFinding) => {
+      if (this.#isInline(finding)) {
+        inline.push(finding);
+      } else if (secondLook.length < SECOND_LOOK_MAX_FINDINGS) {
+        secondLook.push(finding);
+      }
+    };
     const filesByPath = new Map(input.files.map((file) => [file.path, file]));
     const floor = input.severityFloor ?? null;
-    const kept: ReviewFinding[] = [];
     const rejected: EvidenceGateRejectedFinding<ReviewFinding>[] = [];
+    const belowFloor = (severity: ReviewFinding["severity"]) =>
+      floor !== null && severityWeight(severity) < severityWeight(floor);
     let calls = 0;
     for (const finding of findings) {
-      if (kept.length >= input.commentBudget) {
+      if (inline.length >= input.commentBudget) {
         break;
       }
       const file = filesByPath.get(finding.path);
@@ -1006,17 +1070,18 @@ export class ReviewEngine {
       calls += file === undefined ? 0 : 1;
       if (outcome.verdict === "confirmed" || outcome.verdict === "unverified") {
         // Unverified (cap reached or the verifier failed) is not evidence
-        // against the finding: publish it as the reviewer rated it.
-        kept.push({ ...finding, verification: outcome });
+        // against the finding: keep it as the reviewer rated it.
+        keep({ ...finding, verification: outcome });
         continue;
       }
       if (
         outcome.verdict === "refuted" &&
-        (finding.severity === "high" || finding.severity === "critical")
+        (finding.severity === "high" || finding.severity === "critical") &&
+        !belowFloor(downgradeSeverity(finding.severity))
       ) {
         // A small model can talk itself out of a real serious bug; demote
         // instead of deleting so it still gets seen.
-        kept.push({
+        keep({
           ...finding,
           severity: downgradeSeverity(finding.severity),
           verification: outcome,
@@ -1036,10 +1101,7 @@ export class ReviewEngine {
         ...finding,
         severity: downgradeSeverity(finding.severity),
       };
-      if (
-        floor !== null &&
-        severityWeight(downgraded.severity) < severityWeight(floor)
-      ) {
+      if (belowFloor(downgraded.severity)) {
         rejected.push({
           finding,
           findingFingerprint: fingerprintFinding(finding),
@@ -1048,9 +1110,9 @@ export class ReviewEngine {
         });
         continue;
       }
-      kept.push({ ...downgraded, verification: outcome });
+      keep({ ...downgraded, verification: outcome });
     }
-    return { kept, rejected };
+    return { inline, secondLook, rejected };
   }
 
   async #reviewInternal(input: ReviewEngineInput): Promise<{
@@ -1141,10 +1203,7 @@ export class ReviewEngine {
             : {}),
         });
 
-        const response = await this.#model.generateStructuredReview({
-          ...prompt,
-          jsonSchema: reviewResponseJsonSchema,
-        });
+        const response = await this.#generateChunkReview(prompt, files);
         const parsed = modelResponseSchema.parse(response);
         // A chunk may only judge threads it was shown.
         const shownThreadIds = new Set(
@@ -1248,9 +1307,10 @@ export class ReviewEngine {
     return {
       result: {
         ...reviewed.result,
-        ...this.#splitByInlinePolicy(
-          verified.kept.slice(0, input.commentBudget),
-        ),
+        findings: verified.inline,
+        ...(this.#inlinePolicy === "confirmed" && this.#verifier !== null
+          ? { secondLook: verified.secondLook }
+          : {}),
       },
       rejectedFindings: [
         ...gatedFindings.rejectedFindings,

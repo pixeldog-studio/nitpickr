@@ -59,8 +59,15 @@ export function applySeverityFloor(
       dropped.push(finding);
     }
   }
+  const secondLook = result.secondLook?.filter(
+    (finding) => severityWeight(finding.severity) >= floorWeight,
+  );
   return {
-    kept: { ...result, findings: kept },
+    kept: {
+      ...result,
+      findings: kept,
+      ...(secondLook === undefined ? {} : { secondLook }),
+    },
     dropped,
   };
 }

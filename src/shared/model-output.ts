@@ -17,6 +17,17 @@ export class ModelOutputError extends Error {
   }
 }
 
+/**
+ * The reply hit the output-token cap. Retrying the same prompt usually
+ * truncates the same way, so callers handle it instead of the job retry.
+ */
+export class TruncatedOutputError extends ModelOutputError {
+  constructor(message: string) {
+    super(message);
+    this.name = "TruncatedOutputError";
+  }
+}
+
 export type JsonExtraction =
   | { ok: true; value: unknown }
   | { ok: false; reason: string };

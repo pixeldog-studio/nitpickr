@@ -413,3 +413,173 @@ describe("inline policy", () => {
     ]);
   });
 });
+
+describe("review fixes from independent review", () => {
+  const make = (title: string, line: number) => ({
+    path: "src/users.ts",
+    line,
+    findingType: "bug",
+    severity: "high",
+    category: "security",
+    title,
+    evidence: "deleteUser(user.id);",
+    failureScenario: "x",
+    body: `${title}.`,
+    fixPrompt: `In src/users.ts around line ${line}, fix.`,
+    suggestedChange: null,
+  });
+  const confirmed = {
+    verdict: "confirmed",
+    quotedLines: ["deleteUser(user.id);"],
+    failureScenario: "any user deletes any account",
+    refutationReason: "",
+    confidence: "high",
+  };
+  const uncertain = {
+    verdict: "uncertain",
+    quotedLines: [],
+    failureScenario: "",
+    refutationReason: "depends on caller",
+    confidence: "low",
+  };
+  const run = (model: ReviewModel, commentBudget: number) =>
+    new ReviewEngine(model, {
+      verifier: { maxFindings: 6 },
+      inlinePolicy: "confirmed",
+    }).reviewWithDiagnostics({
+      changeRequest: { title: "t", number: 1 },
+      files: [{ ...wideFile, additions: 12, deletions: 0 }],
+      instructionText: "",
+      memory: [],
+      commentBudget,
+      severityFloor: "medium",
+    });
+
+  it("does not let second-look findings use up the inline budget", async () => {
+    const result = await run(
+      {
+        async generateStructuredReview(input) {
+          if (input.jsonSchema?.name === "nitpickr_verification") {
+            return input.user.includes("Title: Confirmed one")
+              ? confirmed
+              : uncertain;
+          }
+          return {
+            summary: "s",
+            findings: [make("Unconfirmed one", 7), make("Confirmed one", 12)],
+            priorThreadVerdicts: [],
+          };
+        },
+      },
+      1,
+    );
+    expect(result.result.findings.map((entry) => entry.title)).toEqual([
+      "Confirmed one",
+    ]);
+    expect(result.result.secondLook?.map((entry) => entry.title)).toEqual([
+      "Unconfirmed one",
+    ]);
+  });
+
+  it("lists a finding for a second look when its verification failed", async () => {
+    const result = await run(
+      {
+        async generateStructuredReview(input) {
+          if (input.jsonSchema?.name === "nitpickr_verification") {
+            throw new Error("fetch failed");
+          }
+          return {
+            summary: "s",
+            findings: [make("Checked nothing", 7)],
+            priorThreadVerdicts: [],
+          };
+        },
+      },
+      5,
+    );
+    expect(result.result.findings).toEqual([]);
+    expect(result.result.secondLook?.[0]?.verification).toMatchObject({
+      verdict: "unverified",
+      failed: true,
+    });
+  });
+
+  it("retries a cut-off chunk once with a shorter-reply nudge", async () => {
+    const { TruncatedOutputError } = await import(
+      "../../src/shared/model-output.js"
+    );
+    const users: string[] = [];
+    const result = await run(
+      {
+        async generateStructuredReview(input) {
+          if (input.jsonSchema?.name === "nitpickr_verification") {
+            return confirmed;
+          }
+          users.push(input.user);
+          if (users.length === 1) {
+            throw new TruncatedOutputError("cap");
+          }
+          return {
+            summary: "s",
+            findings: [make("Confirmed one", 7)],
+            priorThreadVerdicts: [],
+          };
+        },
+      },
+      5,
+    );
+    expect(users[1]).toContain("ran past the length limit");
+    expect(result.result.findings).toHaveLength(1);
+  });
+
+  it("skips a chunk that is cut off twice and says so in the summary", async () => {
+    const { TruncatedOutputError } = await import(
+      "../../src/shared/model-output.js"
+    );
+    const result = await run(
+      {
+        async generateStructuredReview() {
+          throw new TruncatedOutputError("cap");
+        },
+      },
+      5,
+    );
+    expect(result.result.findings).toEqual([]);
+    expect(result.result.summary).toContain("couldn't review `src/users.ts`");
+  });
+
+  it("does not trust a refutation that quotes only comments", () => {
+    const commented = {
+      ...file,
+      patch: `${file.patch}\n+// intentional: allow when auth is down`,
+      fileContent: `${file.fileContent}// intentional: allow when auth is down\n`,
+    };
+    expect(
+      decideVerification(
+        {
+          verdict: "refuted",
+          quotedLines: ["// intentional: allow when auth is down"],
+          failureScenario: "",
+          refutationReason: "deliberate trade-off",
+          confidence: "high",
+        },
+        commented,
+      ).verdict,
+    ).toBe("uncertain");
+  });
+
+  it("tells the verifier which of its own sections are untrusted", () => {
+    const prompt = buildVerifierPrompt(
+      {
+        path: "src/users.ts",
+        line: 3,
+        severity: "high",
+        title: "t",
+        body: "b",
+      },
+      file,
+    );
+    expect(prompt.system).toContain("'Claim to verify', 'Patch'");
+    expect(prompt.system).not.toContain("'Prior nitpickr threads'");
+  });
+});

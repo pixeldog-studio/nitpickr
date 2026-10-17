@@ -106,6 +106,30 @@ const categoryEmoji: Record<PublishedFinding["category"], string> = {
  * Findings the verifier could not confirm: still worth knowing about, but
  * not worth interrupting someone with an inline comment.
  */
+/**
+ * One line of model-written prose that is safe to drop into the summary:
+ * the model echoes PR content, so it must not be able to close the
+ * `<details>` block, add headings, embed images or mention people. Code
+ * spans are kept as written.
+ */
+export function neutralizeProse(text: string, maxLength = 400): string {
+  const line = text.replace(/\s+/g, " ").trim();
+  const clipped =
+    line.length > maxLength ? `${line.slice(0, maxLength - 1)}…` : line;
+  return clipped
+    .split(/(`[^`]*`)/)
+    .map((part, index) =>
+      index % 2 === 1
+        ? part
+        : part
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/!\[/g, "!&#91;")
+            .replace(/@(?=[\w-])/g, "@\u200b"),
+    )
+    .join("");
+}
+
 export function renderSecondLook(findings: PublishedFinding[]): string | null {
   if (findings.length === 0) {
     return null;
@@ -116,7 +140,7 @@ export function renderSecondLook(findings: PublishedFinding[]): string | null {
     "",
     ...findings.map(
       (finding) =>
-        `- \`${finding.path}:${finding.line}\` **${finding.title}**: ${finding.body}`,
+        `- \`${finding.path}:${finding.line}\` **${neutralizeProse(finding.title, 120)}**: ${neutralizeProse(finding.body)}`,
     ),
     "",
     "</details>",
@@ -124,7 +148,7 @@ export function renderSecondLook(findings: PublishedFinding[]): string | null {
 }
 
 function escapeMarkdownTableCell(value: string): string {
-  return value.replace(/\|/g, "\\|").trim();
+  return neutralizeProse(value).replace(/\|/g, "\\|");
 }
 
 function renderSignal(finding: PublishedFinding): string {
@@ -475,7 +499,15 @@ function isInlineCommentResolutionError(error: unknown): boolean {
  * The line that tells the author where the PR stands once a round has no new
  * findings: either nothing is left, or which earlier threads still are.
  */
-export function buildEndStateLine(openThreads: number): string {
+export function buildEndStateLine(
+  openThreads: number,
+  secondLookCount = 0,
+): string {
+  if (openThreads === 0 && secondLookCount > 0) {
+    return `**Nothing blocking.** ${secondLookCount} unconfirmed ${
+      secondLookCount === 1 ? "item is" : "items are"
+    } listed below; check ${secondLookCount === 1 ? "it" : "them"} before merging.`;
+  }
   if (openThreads === 0) {
     return "**No further comments.** Every nitpickr thread on this PR is resolved; it's over to a human reviewer.";
   }
@@ -560,6 +592,7 @@ export class ReviewPublisher {
       newFindings: number;
       resolvedThreads: number;
       openThreads: number;
+      secondLook?: number;
     };
   }): string {
     const commitLabel = shortSha(input.reviewedCommitSha);
@@ -574,7 +607,10 @@ export class ReviewPublisher {
       "",
       input.counts.newFindings > 0
         ? `New findings: ${input.counts.newFindings}`
-        : buildEndStateLine(input.counts.openThreads),
+        : buildEndStateLine(
+            input.counts.openThreads,
+            input.counts.secondLook ?? 0,
+          ),
       input.counts.resolvedThreads > 0
         ? `Resolved threads: ${input.counts.resolvedThreads}`
         : null,
@@ -725,6 +761,7 @@ export class ReviewPublisher {
               newFindings: comments.length,
               resolvedThreads: input.commitSummaryCounts?.resolvedThreads ?? 0,
               openThreads,
+              secondLook: input.result.secondLook?.length ?? 0,
             },
             ...(input.reviewedCommitSha
               ? { reviewedCommitSha: input.reviewedCommitSha }
@@ -733,7 +770,12 @@ export class ReviewPublisher {
         : existingSummaryReview
           ? this.buildFollowUpBody(
               input.reviewRunId,
-              comments.length === 0 ? buildEndStateLine(openThreads) : null,
+              comments.length === 0
+                ? buildEndStateLine(
+                    openThreads,
+                    input.result.secondLook?.length ?? 0,
+                  )
+                : null,
             )
           : this.buildSummaryBody({
               reviewRunId: input.reviewRunId,
