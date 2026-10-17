@@ -183,7 +183,10 @@ export class PostgresJobStore implements JobStore {
         input.priority,
         input.status,
         input.attempts,
-        JSON.stringify(input.payload),
+        // Pass the object: postgres.js encodes jsonb parameters itself, and a
+        // pre-stringified payload is stored as a jsonb *string*, which makes
+        // every `payload->>'…'` query (supersede, check runs) match nothing.
+        input.payload,
         input.maxAttempts,
         input.createdAt,
         input.scheduledAt,

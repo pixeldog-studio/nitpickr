@@ -93,13 +93,12 @@ describe("PostgresJobStore", () => {
 
     expect(created.id).toBe("job_1");
     expect(client.calls[0]?.query).toContain("insert into jobs");
-    expect(client.calls[0]?.params?.[9]).toBe(
-      JSON.stringify({
-        headSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        trigger: "manual_command",
-        mode: "quick",
-      }),
-    );
+    // An object, not a JSON string: see the note in createJob.
+    expect(client.calls[0]?.params?.[9]).toEqual({
+      headSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      trigger: "manual_command",
+      mode: "quick",
+    });
   });
 
   it("finds an active job by dedupe key", async () => {
