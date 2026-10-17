@@ -27,6 +27,13 @@ import {
  */
 export const DEFAULT_MAX_OUTPUT_TOKENS = 6_000;
 
+/** Ollama reports "qwen3.8" as "qwen3.8:latest"; compare like it does. */
+function canonicalModelName(name: string): string {
+  const lower = name.trim().toLowerCase();
+  const lastSegment = lower.slice(lower.lastIndexOf("/") + 1);
+  return lastSegment.includes(":") ? lower : `${lower}:latest`;
+}
+
 /** Give up after the model has been missing from Ollama for ~3 minutes. */
 export const DEFAULT_STALL_WATCH = { intervalMs: 60_000, maxMissing: 3 };
 
@@ -125,11 +132,22 @@ export class ChatCompletionClient {
           const payload = (await response.json()) as {
             models?: Array<{ name?: string; model?: string }>;
           };
-          const loaded = (payload.models ?? []).some(
+          if (!Array.isArray(payload.models)) {
+            clearInterval(timer);
+            return;
+          }
+          const wanted = canonicalModelName(this.#config.model);
+          const loaded = payload.models.some(
             (entry) =>
-              entry.name === this.#config.model ||
-              entry.model === this.#config.model,
+              canonicalModelName(entry.name ?? "") === wanted ||
+              canonicalModelName(entry.model ?? "") === wanted,
           );
+          if (!loaded && missing === 0) {
+            this.#logger.warn("model.chat_completion model_not_loaded", {
+              model: this.#config.model,
+              loaded: payload.models.map((entry) => entry.name ?? entry.model),
+            });
+          }
           missing = loaded ? 0 : missing + 1;
           if (active && missing >= watch.maxMissing) {
             this.#logger.error("model.chat_completion stalled", {

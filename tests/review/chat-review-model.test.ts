@@ -403,3 +403,33 @@ describe("model stall watch", () => {
     expect(probes).toBe(1);
   });
 });
+
+describe("model name matching in the stall watch", () => {
+  it("treats an untagged model as :latest, like Ollama does", async () => {
+    const { ChatCompletionClient } = await import(
+      "../../src/shared/chat-completion-client.js"
+    );
+    const client = new ChatCompletionClient(
+      {
+        model: "Qwen3.8",
+        baseUrl: "http://ollama:11434/v1",
+        stallWatch: { intervalMs: 5, maxMissing: 1 },
+      },
+      async (input) => {
+        if (String(input).endsWith("/api/ps")) {
+          return new Response(
+            JSON.stringify({ models: [{ name: "qwen3.8:latest" }] }),
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        return new Response(
+          JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+        );
+      },
+    );
+    const result = await client.complete({
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(result.content).toBe("ok");
+  });
+});
