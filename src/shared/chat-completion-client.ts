@@ -164,6 +164,8 @@ export class ChatCompletionClient {
       this.#logger.error("model.chat_completion truncated", {
         durationMs: elapsedMs(),
         completionTokens: payload.usage?.completion_tokens,
+        // The tail shows what the model was repeating.
+        contentTail: choice.message?.content?.slice(-400) ?? null,
       });
       throw new ModelOutputError(
         "Model output hit the token cap before finishing (likely a repetition loop).",
