@@ -144,3 +144,17 @@ describe("dismissalThreshold", () => {
     );
   });
 });
+
+describe("dismissal thresholds", () => {
+  it("lets a same-file dismissal hold when the model re-rates it as high", () => {
+    const sameFileHigh = dismissalThreshold(
+      { severity: "high", path: "a.ts" },
+      "a.ts",
+    );
+    expect(sameFileHigh).toBeGreaterThan(0.8); // a related serious finding scored 0.80
+    expect(sameFileHigh).toBeLessThan(0.87); // the re-rated repeat scored 0.86-0.89
+    expect(dismissalThreshold({ severity: "high", path: "a.ts" }, "b.ts")).toBe(
+      0.92,
+    );
+  });
+});

@@ -7,17 +7,20 @@
  * Cosine similarity (nomic-embed-text, finding text vs. stored finding text)
  * at which a new finding repeats a dismissed one. Calibrated on real pairs:
  * repeats scored 0.83-0.90, unrelated findings at most 0.69, and a related
- * but more serious finding 0.80. High and critical findings need a near
- * duplicate so an old nit cannot hide a serious new bug.
+ * but more serious finding 0.80.
  */
 export const DISMISSAL_SIMILARITY = 0.82;
+/** Same file, but the finding is high or critical. */
+export const DISMISSAL_SIMILARITY_SAME_FILE_SEVERE = 0.85;
+/** Another file: one person's dismissal should not silence a class repo-wide. */
 export const DISMISSAL_SIMILARITY_SEVERE = 0.92;
 
 /**
- * How close a finding must be to a past dismissal to be dropped. One
- * person's dismissal on one file should not silence a whole class of
- * findings repo-wide, and an old nit must not hide a serious new bug: both
- * other files and high/critical findings need a near duplicate.
+ * How close a finding must be to a past dismissal to be dropped. A related
+ * but different serious finding scored 0.80 in calibration, so a high or
+ * critical finding on the same file needs 0.85 (the model often re-rates the
+ * same dismissed issue as high), and anything on another file needs a near
+ * duplicate.
  */
 export function dismissalThreshold(
   finding: { severity: string; path: string },
@@ -25,7 +28,8 @@ export function dismissalThreshold(
 ): number {
   const severe = finding.severity === "high" || finding.severity === "critical";
   const samePath = dismissedPath === null || dismissedPath === finding.path;
-  return severe || !samePath
-    ? DISMISSAL_SIMILARITY_SEVERE
-    : DISMISSAL_SIMILARITY;
+  if (!samePath) {
+    return DISMISSAL_SIMILARITY_SEVERE;
+  }
+  return severe ? DISMISSAL_SIMILARITY_SAME_FILE_SEVERE : DISMISSAL_SIMILARITY;
 }
