@@ -27,7 +27,7 @@ describe("second look", () => {
   });
 
   it("does not say 'no further comments' while items are listed", () => {
-    expect(buildEndStateLine(0, 2)).toContain("Nothing blocking");
+    expect(buildEndStateLine(0, 2)).toContain("No confirmed issues");
     expect(buildEndStateLine(0)).toContain("No further comments");
   });
 
@@ -44,5 +44,41 @@ describe("second look", () => {
       "high",
     );
     expect(kept.secondLook?.map((entry) => entry.title)).toEqual(["high"]);
+  });
+});
+
+describe("first-review headline", () => {
+  it("counts unconfirmed items instead of saying nothing was found", async () => {
+    const { summarizeFindingCount } = await import(
+      "../../src/publisher/review-publisher.js"
+    );
+    expect(summarizeFindingCount([], 2)).toBe(
+      "no confirmed issues; 2 unconfirmed items below.",
+    );
+    expect(summarizeFindingCount([])).toBe(
+      "nothing worth flagging in this PR.",
+    );
+  });
+});
+
+describe("parsing nitpickr's own comments", () => {
+  it("reads the whole first paragraph so the fix isn't lost", async () => {
+    const { parseInlineCommentContext } = await import(
+      "../../src/review/reviewer-chat-service.js"
+    );
+    const parsed = parseInlineCommentContext(
+      [
+        "**Fetch has no timeout**",
+        "🟠 High · reliability",
+        "",
+        "A slow upstream hangs the request.",
+        "Pass an AbortSignal with a 5 s timeout.",
+        "",
+        "<!-- nitpickr:fingerprint:x -->",
+      ].join("\n"),
+    );
+    expect(parsed.body).toBe(
+      "A slow upstream hangs the request. Pass an AbortSignal with a 5 s timeout.",
+    );
   });
 });

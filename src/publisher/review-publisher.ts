@@ -169,7 +169,13 @@ function renderGitHubSuggestion(suggestedChange: string | undefined): string[] {
 /** The headline after "nitpickr ·" in the first review. */
 export function summarizeFindingCount(
   findings: Array<Pick<PublishedFinding, "severity">>,
+  secondLookCount = 0,
 ): string {
+  if (findings.length === 0 && secondLookCount > 0) {
+    return `no confirmed issues; ${secondLookCount} unconfirmed ${
+      secondLookCount === 1 ? "item" : "items"
+    } below.`;
+  }
   if (findings.length === 0) {
     return "nothing worth flagging in this PR.";
   }
@@ -511,7 +517,7 @@ export function buildEndStateLine(
   secondLookCount = 0,
 ): string {
   if (openThreads === 0 && secondLookCount > 0) {
-    return `**Nothing blocking.** ${secondLookCount} unconfirmed ${
+    return `**No confirmed issues.** ${secondLookCount} unconfirmed ${
       secondLookCount === 1 ? "item is" : "items are"
     } listed below; check ${secondLookCount === 1 ? "it" : "them"} before merging.`;
   }
@@ -556,6 +562,8 @@ export class ReviewPublisher {
     findings: PublishedFinding[];
     /** False when no files were reviewed (all ignored or none matched). */
     reviewed?: boolean;
+    /** Unconfirmed findings listed under the summary. */
+    secondLookCount?: number;
   }): string {
     const findingTable =
       input.findings.length === 0
@@ -576,7 +584,7 @@ export class ReviewPublisher {
       `**nitpickr** · ${
         input.reviewed === false
           ? "nothing to review here."
-          : summarizeFindingCount(input.findings)
+          : summarizeFindingCount(input.findings, input.secondLookCount ?? 0)
       }`,
       "",
       input.summary.trim(),
@@ -817,6 +825,7 @@ export class ReviewPublisher {
                 postedFingerprints.has(fingerprintFinding(finding)),
               ),
               reviewed: input.files === undefined || input.files.length > 0,
+              secondLookCount: input.result.secondLook?.length ?? 0,
             });
 
     const secondLook = renderSecondLook(input.result.secondLook ?? []);
