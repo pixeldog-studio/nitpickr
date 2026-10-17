@@ -47,6 +47,7 @@ import {
   applySeverityFloor,
   severityFloorForRound,
 } from "../review/severity-floor.js";
+import { neutralizeMarkdown } from "../review/untrusted-content.js";
 import { ModelOutputError } from "../shared/model-output.js";
 
 const REVIEW_DURATION_BUDGET_MS = 300_000;
@@ -2682,7 +2683,11 @@ export class WorkerRunner {
               })
               .catch(() => ({ acknowledgments: [], savedEntries: [] }))
           : { acknowledgments: [], savedEntries: [] };
-      const remembered = learned.savedEntries.map((entry) => entry.summary);
+      // Summaries are model-written from the user's text: neutralize them
+      // like answers before they are posted under nitpickr's name.
+      const remembered = learned.savedEntries.map((entry) =>
+        neutralizeMarkdown(entry.summary.replace(/\s+/g, " ").trim()),
+      );
       return {
         body:
           remembered.length === 0
