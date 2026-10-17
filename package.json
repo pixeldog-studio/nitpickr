@@ -15,6 +15,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "biome check .",
     "test": "vitest run",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm site:build",
     "test:watch": "vitest",
     "dev:api": "tsx --import ./src/observability/instrument.ts src/api/index.ts",
     "dev:worker": "tsx --import ./src/observability/instrument.ts src/worker/index.ts",
