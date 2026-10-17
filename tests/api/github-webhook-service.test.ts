@@ -408,6 +408,57 @@ describe("GitHubWebhookService", () => {
     expect(closed).toEqual(["late_check"]);
   });
 
+  it("cancels queued reviews and closes their checks when a PR is closed", async () => {
+    const adapter = new FakeGitHubAdapter();
+    adapter.normalizedEvent = {
+      kind: "pull_request_closed",
+      installationId: "123456",
+      repository: {
+        installationId: "123456",
+        repositoryId: "github:99",
+        providerRepositoryId: 99,
+        owner: "rubenspessoa",
+        name: "nitpickr",
+        defaultBranch: "main",
+      },
+      pullNumber: 42,
+    } as GitHubNormalizedEvent;
+    const canceled: Array<Record<string, unknown>> = [];
+    const closed: string[] = [];
+    const queue = Object.assign(new FakeQueueScheduler(), {
+      async cancelReviewsForClosedPullRequest(input: Record<string, unknown>) {
+        canceled.push(input);
+        return { canceledCount: 2, checkRunIds: ["c1", "c2"] };
+      },
+    });
+    const service = new GitHubWebhookService(
+      adapter,
+      queue,
+      new FakeWebhookEventService(),
+      new FakeLogger(),
+      {
+        statusPublisher: {
+          markQueued: async () => "x",
+          async markClosed(input) {
+            closed.push(input.checkRunId);
+          },
+        },
+      },
+    );
+    await service.handle({
+      deliveryId: "delivery-closed",
+      eventName: "pull_request",
+      signature: "sha256=test",
+      rawBody: "{}",
+      payload: {},
+    });
+    expect(queue.calls).toEqual([]);
+    expect(canceled).toEqual([
+      { repositoryId: "github:99", changeRequestId: "github:99:42" },
+    ]);
+    expect(closed).toEqual(["c1", "c2"]);
+  });
+
   it("reacts to issue comment mentions before queueing work", async () => {
     const adapter = new FakeGitHubAdapter();
     adapter.mentionReaction = {

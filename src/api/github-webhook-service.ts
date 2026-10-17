@@ -162,7 +162,12 @@ export class GitHubWebhookService implements GitHubWebhookHandler {
     "verifyWebhookSignature" | "normalizeWebhookEvent" | "reactToMention"
   >;
   readonly #queueScheduler: Pick<QueueScheduler, "enqueue"> &
-    Partial<Pick<QueueScheduler, "attachCheckRun">>;
+    Partial<
+      Pick<
+        QueueScheduler,
+        "attachCheckRun" | "cancelReviewsForClosedPullRequest"
+      >
+    >;
   readonly #statusPublisher: Pick<
     ReviewStatusPublisher,
     "markQueued" | "markClosed"
@@ -178,7 +183,12 @@ export class GitHubWebhookService implements GitHubWebhookHandler {
       "verifyWebhookSignature" | "normalizeWebhookEvent" | "reactToMention"
     >,
     queueScheduler: Pick<QueueScheduler, "enqueue"> &
-      Partial<Pick<QueueScheduler, "attachCheckRun">>,
+      Partial<
+        Pick<
+          QueueScheduler,
+          "attachCheckRun" | "cancelReviewsForClosedPullRequest"
+        >
+      >,
     webhookEventService: WebhookEventTracker,
     logger: Logger = noopLogger,
     options: {
@@ -276,6 +286,56 @@ export class GitHubWebhookService implements GitHubWebhookHandler {
           })
           .catch(() => {});
       }
+    }
+  }
+
+  /**
+   * A merged (into any branch) or closed PR needs none of its queued
+   * reviews; drop them so the single model slot goes to open PRs.
+   */
+  async #cancelReviewsOfClosedPullRequest(
+    event: Extract<GitHubNormalizedEvent, { kind: "pull_request_closed" }>,
+    logger: Logger,
+  ): Promise<void> {
+    if (!this.#queueScheduler.cancelReviewsForClosedPullRequest) {
+      return;
+    }
+    try {
+      const canceled =
+        await this.#queueScheduler.cancelReviewsForClosedPullRequest({
+          repositoryId: event.repository.repositoryId,
+          changeRequestId: `${event.repository.repositoryId}:${event.pullNumber}`,
+        });
+      logger.info("Canceled queued reviews of a closed pull request.", {
+        pullNumber: event.pullNumber,
+        canceledCount: canceled.canceledCount,
+      });
+      for (const checkRunId of canceled.checkRunIds) {
+        await this.#statusPublisher
+          ?.markClosed({
+            installationId: event.installationId,
+            repository: {
+              owner: event.repository.owner,
+              name: event.repository.name,
+            },
+            checkRunId,
+            conclusion: "neutral",
+            title: "Pull request closed",
+            summary:
+              "nitpickr skips reviews of pull requests that were merged or closed.",
+          })
+          .catch((error: unknown) => {
+            logger.warn("Failed to close a canceled review check.", {
+              checkRunId,
+              error: toErrorMessage(error, "Unknown status failure."),
+            });
+          });
+      }
+    } catch (error) {
+      logger.warn("Failed to cancel reviews of a closed pull request.", {
+        pullNumber: event.pullNumber,
+        error: toErrorMessage(error, "Unknown queue failure."),
+      });
     }
   }
 
@@ -463,6 +523,16 @@ export class GitHubWebhookService implements GitHubWebhookHandler {
         statusCode: 202,
         accepted: false,
         message: normalized.reason,
+      };
+    }
+
+    if (normalized.kind === "pull_request_closed") {
+      await this.#cancelReviewsOfClosedPullRequest(normalized, requestLogger);
+      await this.#updateWebhookEventStatus(parsed.deliveryId, "ignored");
+      return {
+        statusCode: 202,
+        accepted: true,
+        message: "Canceled queued reviews of a closed pull request.",
       };
     }
 

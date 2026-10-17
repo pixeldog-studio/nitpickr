@@ -339,6 +339,38 @@ export class PostgresJobStore implements JobStore {
     };
   }
 
+  /** Cancel every queued review of a pull request that was closed. */
+  async cancelQueuedReviewJobs(input: {
+    repositoryId: string;
+    changeRequestId: string;
+  }): Promise<{ canceledCount: number; checkRunIds: string[] }> {
+    const rows = await this.#client.unsafe<{
+      canceled_count: number;
+      check_run_ids: string[] | null;
+    }>(
+      `
+        with canceled as (
+          update jobs
+          set status = 'canceled',
+              completed_at = now()
+          where type = 'review_requested'
+            and status = 'queued'
+            and repository_id = $1
+            and change_request_id = $2
+          returning payload->>'checkRunId' as check_run_id
+        )
+        select count(*)::int as canceled_count,
+               array_remove(array_agg(check_run_id), null) as check_run_ids
+        from canceled
+      `,
+      [input.repositoryId, input.changeRequestId],
+    );
+    return {
+      canceledCount: rows[0]?.canceled_count ?? 0,
+      checkRunIds: rows[0]?.check_run_ids ?? [],
+    };
+  }
+
   /**
    * Record the queued check run so the worker updates it instead. False
    * when the job already left the queue (claimed or canceled meanwhile).

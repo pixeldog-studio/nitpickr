@@ -1298,6 +1298,21 @@ export class WorkerRunner {
         throw classifyReviewError("github", error);
       }
       changeRequestContext = context;
+      if (context.changeRequest.status === "closed") {
+        // Merged into any branch or closed: a review helps nobody now.
+        logger.info("Skipping review of a closed pull request.", {
+          jobId: job.id,
+          pullNumber: payload.pullNumber,
+        });
+        queuedCheck.endedEarly = {
+          kind: "close",
+          conclusion: "neutral",
+          title: "Pull request closed",
+          summary:
+            "nitpickr skips reviews of pull requests that were merged or closed.",
+        };
+        return;
+      }
       const latestCompletedReview = this.#reviewLifecycle
         .getLatestCompletedReview
         ? await this.#reviewLifecycle.getLatestCompletedReview(

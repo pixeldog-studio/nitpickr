@@ -120,6 +120,24 @@ describe("queued review check", () => {
     ]);
   });
 
+  it("skips a review of a PR that was merged or closed meanwhile", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    await runner(job(), {
+      fetchContext: async () => ({
+        ...context,
+        changeRequest: { ...context.changeRequest, status: "closed" },
+      }),
+      calls,
+    }).runOnce({ workerId: "worker_1", perTenantCap: 1 });
+    expect(calls).toEqual([
+      expect.objectContaining({
+        type: "closed",
+        checkRunId: "queued_1",
+        title: "Pull request closed",
+      }),
+    ]);
+  });
+
   it("marks it failed when the job fails for good before the review starts", async () => {
     const calls: Array<Record<string, unknown>> = [];
     await runner(job(), {

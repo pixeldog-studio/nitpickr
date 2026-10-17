@@ -35,7 +35,7 @@ const pullRequestSchema = z.object({
 });
 
 const pullRequestEventSchema = z.object({
-  action: z.enum(["opened", "synchronize", "ready_for_review"]),
+  action: z.enum(["opened", "synchronize", "ready_for_review", "closed"]),
   installation: z.object({
     id: z.number().int().positive(),
   }),
@@ -337,6 +337,13 @@ export type GitHubNormalizedEvent =
           };
     }
   | {
+      /** Merged into any branch, or closed without merging. */
+      kind: "pull_request_closed";
+      installationId: string;
+      repository: NormalizedRepositoryRef;
+      pullNumber: number;
+    }
+  | {
       kind: "ignored";
       reason: string;
     };
@@ -612,6 +619,14 @@ export class GitHubAdapter {
         parsed.repository,
         parsed.installation.id,
       );
+      if (parsed.action === "closed") {
+        return {
+          kind: "pull_request_closed",
+          installationId: repository.installationId,
+          repository,
+          pullNumber: parsed.pull_request.number,
+        };
+      }
 
       const trigger: ReviewTrigger =
         parsed.action === "opened"

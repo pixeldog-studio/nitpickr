@@ -71,6 +71,10 @@ export interface JobStore {
     createdBefore: Date;
   }): Promise<{ canceledCount: number; checkRunIds: string[] }>;
   setJobCheckRun(jobId: string, checkRunId: string): Promise<boolean>;
+  cancelQueuedReviewJobs(input: {
+    repositoryId: string;
+    changeRequestId: string;
+  }): Promise<{ canceledCount: number; checkRunIds: string[] }>;
   requeueStaleRunningJobs(input: {
     activeWorkerIds: string[];
     staleStartedBefore: Date;
@@ -206,6 +210,16 @@ export class QueueScheduler {
     assertNonEmpty(input.headSha, "headSha");
 
     return this.#store.cancelSupersededReviewJobs(input);
+  }
+
+  /** A closed or merged PR needs none of its queued reviews. */
+  async cancelReviewsForClosedPullRequest(input: {
+    repositoryId: string;
+    changeRequestId: string;
+  }): Promise<{ canceledCount: number; checkRunIds: string[] }> {
+    assertNonEmpty(input.repositoryId, "repositoryId");
+    assertNonEmpty(input.changeRequestId, "changeRequestId");
+    return this.#store.cancelQueuedReviewJobs(input);
   }
 
   async attachCheckRun(jobId: string, checkRunId: string): Promise<boolean> {
