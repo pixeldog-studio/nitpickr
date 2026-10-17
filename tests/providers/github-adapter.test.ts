@@ -252,6 +252,26 @@ describe("GitHubAdapter", () => {
     expect(event.mode).toBe("quick");
   });
 
+  it("normalizes a closed or merged pull request", () => {
+    const adapter = new GitHubAdapter({
+      apiClient: new FakeGitHubApiClient(),
+      appConfig: {
+        appId: 123456,
+        privateKey: "test",
+        webhookSecret: "super-secret",
+        webhookUrl: "https://nitpickr.example.com/webhooks/github",
+      },
+    });
+    const event = adapter.normalizeWebhookEvent("pull_request", {
+      ...pullRequestPayload,
+      action: "closed",
+    });
+    expect(event).toMatchObject({
+      kind: "pull_request_closed",
+      pullNumber: pullRequestPayload.pull_request.number,
+    });
+  });
+
   it("ignores unsupported pull request actions instead of throwing", () => {
     const adapter = new GitHubAdapter({
       apiClient: new FakeGitHubApiClient(),
