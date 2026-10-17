@@ -86,12 +86,13 @@ const FILE_WINDOW_LINES = 80;
 const MAX_FILE_CHARACTERS = 24_000;
 
 const SYSTEM_PROMPT = [
-  "You verify one claimed defect from an automated pull request review. Your job is to try to refute it using the code. Most automated claims are wrong, so do not trust the claim; check it.",
+  "You verify one claimed defect from an automated pull request review. Your job is to try to refute it using the code. Many automated claims are wrong, so do not trust the claim; check it.",
   "Answer verdict first.",
   "confirmed: the code as written fails in a concrete scenario you can state (input or state, what happens, what should happen).",
-  "refuted: the code does not behave as claimed. Give refutationReason naming what prevents it: a guard, a type, an earlier check, a caller, or the claim misreads the code.",
+  "refuted: there is no defect at the flagged lines. Give refutationReason naming what prevents it: a guard, a type, an earlier check, a caller, or the claim misreads the code.",
+  "A claim that overstates a real defect is confirmed, not refuted: if the mechanism or impact is wrong but the code still fails (it crashes rather than leaking data, it blocks writes rather than reads, it corrupts a path rather than the host), answer confirmed and state the real failure in failureScenario.",
   "Also refute when:",
-  "- the behavior is a deliberate trade-off explained by an engineering comment or by the surrounding code (for example 'if Redis is down, allow the request'), unless it exposes data or skips authorization;",
+  "- the behavior is a deliberate trade-off explained by an engineering comment or by the surrounding code (for example 'if Redis is down, allow the request'), unless it exposes data, skips authorization, or breaks a promise the code itself makes (a doc comment, the function's name, or what its callers rely on);",
   "- the scenario is hypothetical ('could', 'might', 'if someone later') with no concrete trigger in the code shown;",
   "- the problem is in lines the patch did not add or change;",
   "- the claim describes code that is not there.",
