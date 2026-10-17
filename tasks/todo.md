@@ -30,6 +30,17 @@ Baseline commit: `e7aecec`. One PR per milestone; never merge; nitpickr reviews 
 - [x] Independent review: 7 issues fixed (budget counted second-look items, failed checks went inline, truncation failed the whole review, floor skipped demotions, end state ignored second look, unescaped prose, comment-only refutations)
 - [x] Merged as #16 (e890360); separate fix #17 for jobs orphaned by worker restarts (d7b94c7)
 ## Milestone 4 — conversation
+- [x] `@nitpickrai <question>` answered by the model, grounded in the PR; `reconsider` re-runs the verifier; command tips in the first review
+- [x] Two independent reviews: 7 + 6 issues fixed (answers were requested in JSON mode, unescaped answers, non-retried posts, untrusted headings, human threads, edits)
+- [x] Merged as #18 (19a8621)
+- [ ] Live check of an `@nitpickrai` question (after deploy)
+
+## Production fixes found while dogfooding (2026-10-17)
+- [x] #17 worker ids unique per start (orphaned job blocked the queue 15 h)
+- [x] #19 queued `nitpickr / review` check at enqueue; job payloads stored as jsonb objects (supersede never matched before)
+- [x] #20 skip reviews of PRs merged into any branch or closed
+- [x] #21 heartbeats during reviews; requeue on shutdown; 2-minute stale recovery
+- [ ] Follow-up: ownership-guard completeJob/failJob; escalate repeated heartbeat failures
 ## Milestone 5 — learning
 ## Milestone 6 — voice
 
@@ -42,6 +53,7 @@ Baseline commit: `e7aecec`. One PR per milestone; never merge; nitpickr reviews 
 | #14 r2 (old build) | 1 | 0 | 1 | 0 | — | refactor nit |
 | #14 r3 (old build) | 1 | 0 | 1 | 1 (suggestion inapplicable) | 4 (found by independent review) | body cut at `expect(.` again |
 | #16 r1 (old build, qwen3.6) | 8 | 0 | 5 | 3 (misread the code: resume skip, regex, a `splice` that does not exist) | 7 (found by independent review) | 15 h queue stall delayed it; summary stacked 4 chunk paragraphs |
+| #18 r1 (new build, qwen3.8) | 0 inline + 4 second look | 0 | 0 | 4 second-look items, all unfounded (already sanitized; non-empty tuple) | 6 (found by independent review: JSON-mode answers, unescaped answers, non-retried post, untrusted headings, human threads, edits) | ~20 min for a large PR; summary still stacks chunk paragraphs; no visible check while queued (fixed in #19) |
 
 # Website Metadata + SEO Refresh
 

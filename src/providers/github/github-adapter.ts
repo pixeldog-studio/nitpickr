@@ -193,10 +193,12 @@ export interface GitHubApiClient {
       fingerprint: string;
       isResolved: boolean;
       isOutdated?: boolean;
+      originalCommitSha?: string;
       body: string;
       reactionSummary: {
         positiveCount: number;
         negativeCount: number;
+        negativeReactors?: string[];
       };
     }>
   >;
@@ -470,6 +472,7 @@ function isTrustedAuthor(association: string | undefined): boolean {
 function visibleText(body: string): string {
   return body
     .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`[^`\n]*`/g, " ")
     .split("\n")
     .filter((line) => !line.trimStart().startsWith(">"))
     .join("\n")
@@ -504,13 +507,19 @@ export function classifyInteraction(
   const handles = botLogins.map((login) =>
     login.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
   );
+  // Anywhere in the comment ("Hey @nitpickr, why…"), not only at a line
+  // start; quotes and code are already stripped, so quoting an old question
+  // doesn't ask it again.
   const mention = new RegExp(
-    `(^|\\n)\\s*@(?:${handles.join("|")})\\b[\\s:,-]*`,
+    `(^|[^\\w@./-])@(?:${handles.join("|")})\\b[\\s:,-]*`,
     "i",
   );
   let addressed: string;
   if (mention.test(text)) {
     addressed = text.replace(mention, "$1").trim();
+    if (ACKNOWLEDGEMENT.test(addressed.replace(/[!.]+$/, "").trim())) {
+      return null;
+    }
   } else if (input.inThread) {
     if (/(^|\s)@[a-z0-9-]+/i.test(text) || ACKNOWLEDGEMENT.test(text)) {
       return null;
@@ -1039,10 +1048,12 @@ export class GitHubAdapter {
       fingerprint: string;
       isResolved: boolean;
       isOutdated?: boolean;
+      originalCommitSha?: string;
       body: string;
       reactionSummary: {
         positiveCount: number;
         negativeCount: number;
+        negativeReactors?: string[];
       };
     }>
   > {

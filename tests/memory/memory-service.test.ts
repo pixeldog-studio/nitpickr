@@ -515,3 +515,144 @@ describe("MemoryService", () => {
     expect(store.entries).toEqual([]);
   });
 });
+
+/** Bag-of-words embedder: similar wording gives a high cosine. */
+const wordEmbedder: MemoryEmbedder = {
+  async embed(text: string) {
+    const vector = new Array(64).fill(0);
+    for (const word of text.toLowerCase().match(/[a-z]+/g) ?? []) {
+      let hash = 0;
+      for (const char of word) hash = (hash * 31 + char.charCodeAt(0)) % 64;
+      vector[hash] += 1;
+    }
+    return vector;
+  },
+};
+
+describe("MemoryService dismissals", () => {
+  it("records dismissed findings per repository and finds look-alikes", async () => {
+    const store = new InMemoryMemoryStore();
+    const service = new MemoryService(store, { embedder: wordEmbedder });
+
+    const saved = await service.recordDismissedFinding({
+      tenantId: "tenant_1",
+      repositoryId: "repo_1",
+      path: "src/users.ts",
+      title: "fetch call has no timeout",
+      body: "A slow upstream can hang the request.",
+      signal: "thumbs_down",
+    });
+    expect(saved?.kind).toBe("dismissed_finding");
+    expect(saved?.summary).toBe(
+      "fetch call has no timeout. A slow upstream can hang the request.",
+    );
+
+    const similar = await service.findSimilarDismissals({
+      tenantId: "tenant_1",
+      repositoryId: "repo_1",
+      text: "fetch call has no timeout. A hung upstream blocks the request.",
+      minSimilarity: 0.3,
+    });
+    expect(similar).toHaveLength(1);
+
+    const unrelated = await service.findSimilarDismissals({
+      tenantId: "tenant_1",
+      repositoryId: "repo_1",
+      text: "SQL injection through string interpolation in search query",
+      minSimilarity: 0.3,
+    });
+    expect(unrelated).toEqual([]);
+
+    const otherRepo = await service.findSimilarDismissals({
+      tenantId: "tenant_1",
+      repositoryId: "repo_2",
+      text: "fetch call has no timeout",
+      minSimilarity: 0.3,
+    });
+    expect(otherRepo).toEqual([]);
+  });
+
+  it("finds nothing without an embedder", async () => {
+    const service = new MemoryService(new InMemoryMemoryStore());
+    expect(
+      await service.findSimilarDismissals({
+        tenantId: "t",
+        repositoryId: "r",
+        text: "x",
+        minSimilarity: 0.1,
+      }),
+    ).toEqual([]);
+  });
+});
+
+describe("dismissal safeguards", () => {
+  const embedder: MemoryEmbedder = {
+    async embed() {
+      return [1, 0, 0];
+    },
+  };
+
+  it("stores a chat-classified dismissal as a prompt note, not a filter", async () => {
+    const store = new InMemoryMemoryStore();
+    const service = new MemoryService(store, {
+      classifier: {
+        async extract() {
+          return {
+            entries: [
+              {
+                kind: "dismissed_finding",
+                summary: "Stop flagging missing timeouts.",
+                tags: [],
+                globs: [],
+                confidence: 0.9,
+              },
+            ],
+            acknowledgment: "ok",
+          };
+        },
+      },
+      createId: () => "m1",
+    });
+    await service.ingestDiscussion({
+      tenantId: "t",
+      repositoryId: "r",
+      discussions: [{ authorLogin: "someone", body: "x", path: null }],
+    });
+    expect(store.entries.map((entry) => entry.kind)).toEqual([
+      "false_positive",
+    ]);
+  });
+
+  it("keeps look-alike dismissals on different files apart", async () => {
+    const store = new InMemoryMemoryStore();
+    let id = 0;
+    const service = new MemoryService(store, {
+      embedder,
+      createId: () => {
+        id += 1;
+        return `m${id}`;
+      },
+    });
+    for (const path of ["a.ts", "b.ts"]) {
+      await service.recordDismissedFinding({
+        tenantId: "t",
+        repositoryId: "r",
+        path,
+        title: "fetch has no timeout",
+        body: "A slow upstream hangs the request.",
+        signal: "thumbs_down",
+        category: "correctness",
+        sourceThreadId: `thread_${path}`,
+      });
+    }
+    expect(store.entries.map((entry) => entry.path)).toEqual(["a.ts", "b.ts"]);
+    expect(
+      await service.hasDismissalFromThread({
+        tenantId: "t",
+        repositoryId: "r",
+        threadId: "thread_b.ts",
+      }),
+    ).toBe(true);
+    expect(store.entries[0]?.tags).toContain("category:correctness");
+  });
+});

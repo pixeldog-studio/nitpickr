@@ -679,6 +679,11 @@ export interface ReviewEngineInput {
    * Applied before the comment budget so low findings never take a slot.
    */
   severityFloor?: Severity | null;
+  /**
+   * Returns why a finding resembles one this repo already dismissed (thumbs
+   * down, refuted on reconsider, resolved without a change), or null.
+   */
+  dismissalCheck?: (finding: ReviewFinding) => Promise<string | null>;
 }
 
 export interface ReviewEngineResult {
@@ -1302,7 +1307,24 @@ export class ReviewEngine {
     });
 
     const nearby = collapseNearbyFindings(gatedFindings.acceptedFindings);
-    const verified = await this.#verify(nearby.kept, input);
+    const dismissalRejected: EvidenceGateRejectedFinding<ReviewFinding>[] = [];
+    const undismissed: ReviewFinding[] = [];
+    for (const finding of nearby.kept) {
+      const dismissal = input.dismissalCheck
+        ? await input.dismissalCheck(finding)
+        : null;
+      if (dismissal === null) {
+        undismissed.push(finding);
+      } else {
+        dismissalRejected.push({
+          finding,
+          findingFingerprint: fingerprintFinding(finding),
+          reasons: ["similar_to_dismissed"],
+          detail: dismissal,
+        });
+      }
+    }
+    const verified = await this.#verify(undismissed, input);
 
     return {
       result: {
@@ -1319,6 +1341,7 @@ export class ReviewEngine {
           findingFingerprint: fingerprintFinding(finding),
           reasons: ["duplicates_nearby_finding" as const],
         })),
+        ...dismissalRejected,
         ...verified.rejected,
       ],
       promptUsage: reviewed.promptUsage,

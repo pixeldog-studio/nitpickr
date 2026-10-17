@@ -218,6 +218,7 @@ export class EvalCaptureCommand {
         memory: [],
         commentBudget: 10,
         priorReviewRoundCount: 0,
+        dismissals: [],
       },
       expectedFindings: [],
     };

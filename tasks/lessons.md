@@ -59,3 +59,6 @@
 - Ollama folds thinking tokens into `prompt_tokens` when `reasoning_effort` is on; compare model configurations by wall-clock, not reported usage.
 - Live-model evals must not over-constrain expectations (e.g. requiring `category: security` for an authorization bug the model files under `correctness`); match on path + line window and keep category optional.
 - `tasks/todo.md` is cumulative — append a new section per task; never overwrite the file.
+- Never merge while a PR check is still running, even when the same commit passed locally: wait for `gh pr checks` to be all green (`mergeStateStatus` CLEAN, not UNSTABLE). Merged #19 with CI in progress on 2026-10-17.
+- With postgres.js, pass objects (not `JSON.stringify(...)`) to `::jsonb` parameters: the driver encodes jsonb itself, so a pre-stringified value is stored as a jsonb string and every `->>` query silently matches nothing. Fake SQL clients in unit tests can't catch this; verify SQL that reads inside jsonb against a real Postgres (read-only `select $1::jsonb->>'k'` is enough).
+- When a review reports several stuck-state paths, settle the state in one place that every exit passes through (a wrapper/finally) instead of patching each exit; the per-exit patch introduced a new stuck path.

@@ -154,6 +154,7 @@ describe("transport retries", () => {
           memory: [],
           commentBudget: 5,
           priorReviewRoundCount: 0,
+          dismissals: [],
         },
       },
     ]);
@@ -238,5 +239,128 @@ describe("resuming a run", () => {
     expect(calls).toBe(1);
     expect(result.cases.map((entry) => entry.name)).toEqual(["done", "todo"]);
     expect(progress).toEqual([2]);
+  });
+});
+
+describe("learning pairs", () => {
+  it("reports whether a repo learning changed the review", async () => {
+    const { summarizeLearningPairs } = await import(
+      "../../src/eval/live-review-evaluator.js"
+    );
+    const pairs = summarizeLearningPairs([
+      report({
+        name: "dismissal-control",
+        kind: "learning",
+        matched: [{ expected: "timeout", finding: "f" }],
+        findings: [finding("medium")],
+      }),
+      report({ name: "dismissal-applied", kind: "learning", findings: [] }),
+      report({
+        name: "unchanged-control",
+        kind: "learning",
+        findings: [finding("medium")],
+        unexpected: ["x"],
+      }),
+      report({
+        name: "unchanged-applied",
+        kind: "learning",
+        findings: [finding("medium")],
+        unexpected: ["x"],
+      }),
+    ]);
+
+    expect(pairs.map((pair) => [pair.name, pair.learningApplied])).toEqual([
+      ["dismissal", true],
+      ["unchanged", false],
+    ]);
+  });
+});
+
+describe("dismissal filter in the eval", () => {
+  it("drops findings that repeat a fixture dismissal", async () => {
+    const { LiveReviewEvaluator } = await import(
+      "../../src/eval/live-review-evaluator.js"
+    );
+    const embedder = {
+      async embed(text: string) {
+        const vector = new Array(32).fill(0);
+        for (const word of text.toLowerCase().match(/[a-z]+/g) ?? []) {
+          vector[word.length % 32] += 1;
+        }
+        return vector;
+      },
+    };
+    const report = await new LiveReviewEvaluator({
+      embedder,
+      transportRetryDelayMs: 0,
+      engineOptions: { requireEvidence: false },
+      model: {
+        async generateStructuredReview() {
+          return {
+            summary: "s",
+            findings: [
+              {
+                path: "a.ts",
+                line: 1,
+                findingType: "bug",
+                severity: "medium",
+                category: "correctness",
+                title: "fetch call has no timeout",
+                body: "A slow upstream can hang the request.",
+                fixPrompt: "Add a timeout in a.ts at line 1.",
+              },
+            ],
+          };
+        },
+      },
+    }).evaluate([
+      {
+        name: "filtered",
+        kind: "learning",
+        stack: "typescript",
+        expectedVerdicts: [],
+        expectedFindings: [],
+        input: {
+          changeRequest: { title: "t", number: 1 },
+          files: [
+            {
+              path: "a.ts",
+              additions: 1,
+              deletions: 0,
+              patch: "@@ -0,0 +1 @@\n+fetch(url)",
+            },
+          ],
+          instructionText: "",
+          memory: [],
+          commentBudget: 5,
+          priorReviewRoundCount: 0,
+          dismissals: [
+            {
+              title: "fetch call has no timeout",
+              body: "A slow upstream can hang the request.",
+              path: "a.ts",
+              category: null,
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(report.cases[0]?.findings).toEqual([]);
+  });
+
+  it("does not credit a learning when the control case errored", async () => {
+    const { summarizeLearningPairs } = await import(
+      "../../src/eval/live-review-evaluator.js"
+    );
+    const [pair] = summarizeLearningPairs([
+      report({ name: "x-control", kind: "learning", error: "fetch failed" }),
+      report({
+        name: "x-applied",
+        kind: "learning",
+        findings: [finding("medium")],
+      }),
+    ]);
+    expect(pair?.learningApplied).toBe(false);
   });
 });
