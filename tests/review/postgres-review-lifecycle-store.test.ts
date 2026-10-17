@@ -203,6 +203,10 @@ describe("PostgresReviewLifecycleStore", () => {
       comparedFromSha: null,
     });
     expect(client.calls[0]?.query).toContain("from review_runs");
+    // A failed run must not count as reviewed.
+    expect(client.calls[0]?.query).toContain(
+      "status in ('published', 'skipped')",
+    );
     expect(client.calls[0]?.query).toContain("completed_at desc");
   });
 

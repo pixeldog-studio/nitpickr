@@ -141,7 +141,9 @@ export class PostgresReviewLifecycleStore implements ReviewLifecycleStore {
           completed_at
         from review_runs
         where change_request_id = $1
-          and completed_at is not null
+          -- Only reviews that reached the PR: a failed run must not make
+          -- its commit look reviewed (or become the next delta's base).
+          and status in ('published', 'skipped')
         order by completed_at desc
         limit 1
       `,

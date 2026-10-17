@@ -56,7 +56,12 @@ function runner(
       completeJob: async () => ({ ...current, status: "completed" }),
       failJob: async () => ({ ...current, status: "failed" }),
     },
-    githubAdapter: { fetchChangeRequestContext: input.fetchContext },
+    githubAdapter: {
+      fetchChangeRequestContext: input.fetchContext,
+      async createIssueComment(call: { body: string }) {
+        input.calls.push({ type: "comment", body: call.body });
+      },
+    },
     instructionBundleLoader: { loadForReview: async () => ({}) },
     memoryService: { getRelevantMemories: async () => [] },
     reviewPlanner: { plan: () => ({}) },
@@ -138,7 +143,7 @@ describe("queued review check", () => {
     ]);
   });
 
-  it("marks it failed when the job fails for good before the review starts", async () => {
+  it("marks it failed and says so on the PR when the job fails for good", async () => {
     const calls: Array<Record<string, unknown>> = [];
     await runner(job(), {
       fetchContext: async () => {
@@ -152,6 +157,10 @@ describe("queued review check", () => {
         checkRunId: "queued_1",
         conclusion: "failure",
       }),
+      {
+        type: "comment",
+        body: "**nitpickr** couldn't finish reviewing `bbbbbbb`: a GitHub API request failed. Comment `@nitpickr review` to try again.",
+      },
     ]);
   });
 
