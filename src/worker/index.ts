@@ -28,9 +28,11 @@ async function main(): Promise<void> {
   // Beat on a timer, not once per loop: a review holds the loop for many
   // minutes, and a worker that looks dead mid-review would have its job
   // treated as orphaned. A fresh heartbeat now always means "alive".
+  // Repeats whatever status the loop last reported (ready / setup_required).
+  let heartbeatStatus: "ready" | "setup_required" = "ready";
   const beat = () =>
     runtime.workerHeartbeatService
-      .recordHeartbeat({ workerId, status: "ready" })
+      .recordHeartbeat({ workerId, status: heartbeatStatus })
       .catch((error: unknown) => {
         logger.warn("Worker heartbeat failed.", {
           workerId,
@@ -50,8 +52,10 @@ async function main(): Promise<void> {
     shuttingDown = true;
     clearInterval(heartbeatTimer);
     logger.info("Shutting down worker.", { signal, workerId });
-    // A deploy stops this process mid-review: hand the job back now rather
-    // than leave it running under a dead worker id.
+    // Flush first, then hand the job back and exit at once: the review is
+    // still running in this process, so the gap between requeue and exit
+    // (where it could still publish or complete the job) must stay tiny.
+    await Sentry.close(2000);
     try {
       const requeued = await runtime.queueScheduler.requeueWorkerJobs(workerId);
       if (requeued > 0) {
@@ -66,7 +70,6 @@ async function main(): Promise<void> {
         error: error instanceof Error ? error.message : String(error),
       });
     }
-    await Sentry.close(2000);
     process.exit(0);
   };
   process.once("SIGTERM", () => void shutdown("SIGTERM"));
@@ -98,6 +101,7 @@ async function main(): Promise<void> {
     if (!operationalRuntime) {
       const setupStatus = await runtime.runtimeConfigService.getSetupStatus();
       const setupStatusSignature = JSON.stringify(setupStatus);
+      heartbeatStatus = "setup_required";
       await runtime.workerHeartbeatService.recordHeartbeat({
         workerId,
         status: "setup_required",
@@ -127,6 +131,7 @@ async function main(): Promise<void> {
       });
     }
 
+    heartbeatStatus = "ready";
     await runtime.workerHeartbeatService.recordHeartbeat({
       workerId,
       status: "ready",
