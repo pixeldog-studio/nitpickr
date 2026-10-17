@@ -33,7 +33,7 @@ NITPICKR_MODEL_REASONING_EFFORT=none                          # thinking models:
 NITPICKR_MODEL_REQUEST_TIMEOUT_MS=600000                      # 10 min; output is capped at 6k tokens
 NITPICKR_MODEL_MAX_CONCURRENT_REQUESTS=1               # Ollama serves one request at a time
 NITPICKR_REVIEW_CHUNK_MAX_TOTAL_CHARS=160000           # ≈40k tokens per chunk
-NITPICKR_JOB_STALE_AFTER_MS=3600000                    # must exceed your slowest review
+NITPICKR_JOB_STALE_AFTER_MS=120000                     # recover a dead worker's job after 2 min
 # NITPICKR_INLINE_POLICY=confirmed                     # default: only verifier-confirmed findings go inline; the rest are listed in the summary
 NITPICKR_WORKER_CONCURRENCY=1
 ```
@@ -43,10 +43,10 @@ Why each matters:
 - **`NITPICKR_MODEL_REASONING_EFFORT`** — Ollama enables thinking by default on models
   that support it. `none` gives the fastest reviews; `high` costs 3–10× more
   output tokens. Compare with the eval below before choosing.
-- **`NITPICKR_MODEL_REQUEST_TIMEOUT_MS`** and **`NITPICKR_JOB_STALE_AFTER_MS`** — the
-  stale-job reclaim acts as a hard deadline; if a review takes longer than
-  `NITPICKR_JOB_STALE_AFTER_MS` the job is re-queued while the first request is
-  still running, doubling the load. Keep it above the request timeout.
+- **`NITPICKR_JOB_STALE_AFTER_MS`** — how long a running job must be held by a
+  worker that stopped sending heartbeats before it is re-queued. The worker
+  beats on a timer during reviews, so this is not a review deadline; a
+  stopping worker (deploy) also hands its job back on SIGTERM.
 - **`NITPICKR_MODEL_MAX_CONCURRENT_REQUESTS=1`** — nitpickr splits large PRs
   into chunks and reviews them in parallel by default. Against a single-request
   server that only adds queueing; run them sequentially.

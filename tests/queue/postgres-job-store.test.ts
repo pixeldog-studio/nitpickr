@@ -219,6 +219,23 @@ describe("PostgresJobStore", () => {
     expect(client.calls[0]?.query).toContain("worker_id");
   });
 
+  it("hands a stopping worker's running jobs back to the queue", async () => {
+    const client = new FakePostgresClient();
+    client.queueResponse([{ id: "job_1" }, { id: "job_2" }]);
+    const store = new PostgresJobStore(client);
+
+    const requeued = await store.requeueWorkerJobs(
+      "worker-a",
+      new Date("2026-03-09T10:00:00.000Z"),
+    );
+
+    expect(requeued).toBe(2);
+    expect(client.calls[0]?.query).toContain(
+      "where status = 'running' and worker_id = $1",
+    );
+    expect(client.calls[0]?.params?.[0]).toBe("worker-a");
+  });
+
   it("rejects empty identifiers before querying", async () => {
     const client = new FakePostgresClient();
     const store = new PostgresJobStore(client);

@@ -71,6 +71,7 @@ export interface JobStore {
     createdBefore: Date;
   }): Promise<{ canceledCount: number; checkRunIds: string[] }>;
   setJobCheckRun(jobId: string, checkRunId: string): Promise<boolean>;
+  requeueWorkerJobs(workerId: string, requeuedAt: Date): Promise<number>;
   cancelQueuedReviewJobs(input: {
     repositoryId: string;
     changeRequestId: string;
@@ -226,6 +227,12 @@ export class QueueScheduler {
     assertNonEmpty(jobId, "jobId");
     assertNonEmpty(checkRunId, "checkRunId");
     return this.#store.setJobCheckRun(jobId, checkRunId);
+  }
+
+  /** Hand a stopping worker's running jobs back to the queue. */
+  async requeueWorkerJobs(workerId: string): Promise<number> {
+    assertNonEmpty(workerId, "workerId");
+    return this.#store.requeueWorkerJobs(workerId, this.#now());
   }
 
   async recoverStaleRunningJobs(input: {
