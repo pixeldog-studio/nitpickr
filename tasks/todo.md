@@ -43,6 +43,10 @@ Baseline commit: `e7aecec`. One PR per milestone; never merge; nitpickr reviews 
 - [ ] Follow-up: ownership-guard completeJob/failJob; escalate repeated heartbeat failures
 ## Milestone 5 — learning
 ## Milestone 6 — voice
+- [x] Voice sample (20 comments + summary) approved by the owner on 2026-10-17, with one requirement: every comment is clear, reads like a colleague, and states the issue and the recommended fix (now in the review prompt)
+- [x] Inline comments: bold problem, one label line, no "Where:" line; first review leads with one headline; multi-chunk summaries are one short paragraph
+- [x] Eval reports keep the fix prompt and failure scenario so the final sample shows real output
+- [ ] Final full eval on the stack; regenerate the sample from it
 
 ## Dogfood scorecard
 

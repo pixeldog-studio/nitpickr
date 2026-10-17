@@ -183,7 +183,8 @@ export interface LiveCaseReport {
       | "title"
       | "body"
       | "verification"
-    >
+    > &
+      Partial<Pick<ReviewFinding, "fixPrompt" | "failureScenario">>
   >;
   error: string | null;
 }
@@ -544,6 +545,11 @@ export class LiveReviewEvaluator {
           findingType: finding.findingType,
           title: finding.title,
           body: finding.body,
+          // Kept so a voice sample shows what was really posted.
+          fixPrompt: finding.fixPrompt,
+          ...(finding.failureScenario
+            ? { failureScenario: finding.failureScenario }
+            : {}),
           ...(finding.verification
             ? { verification: finding.verification }
             : {}),
