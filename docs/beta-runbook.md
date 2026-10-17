@@ -63,8 +63,7 @@
   `NITPICKR_MODEL_REASONING_EFFORT=none`.
 - `model.chat_completion transport_error ... TimeoutError`: raise
   `NITPICKR_MODEL_REQUEST_TIMEOUT_MS`, lower
-  `NITPICKR_REVIEW_CHUNK_MAX_TOTAL_CHARS`, and keep
-  `NITPICKR_JOB_STALE_AFTER_MS` above the timeout.
+  `NITPICKR_REVIEW_CHUNK_MAX_TOTAL_CHARS`.
 - `memory_embedder.embed dimension_mismatch`: `NITPICKR_EMBEDDING_DIMENSIONS`
   does not match `NITPICKR_EMBEDDING_MODEL`; fix it and re-run `migrate`.
 - `memory_embedder.model_load_failed`: the in-process embedding model could not

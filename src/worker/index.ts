@@ -25,12 +25,47 @@ async function main(): Promise<void> {
   let previousSetupStatusSignature: string | null = null;
   let shuttingDown = false;
 
+  // Beat on a timer, not once per loop: a review holds the loop for many
+  // minutes, and a worker that looks dead mid-review would have its job
+  // treated as orphaned. A fresh heartbeat now always means "alive".
+  const beat = () =>
+    runtime.workerHeartbeatService
+      .recordHeartbeat({ workerId, status: "ready" })
+      .catch((error: unknown) => {
+        logger.warn("Worker heartbeat failed.", {
+          workerId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+  const heartbeatTimer = setInterval(
+    () => void beat(),
+    runtime.config.worker.heartbeatIntervalMs,
+  );
+  heartbeatTimer.unref();
+
   const shutdown = async (signal: string): Promise<void> => {
     if (shuttingDown) {
       return;
     }
     shuttingDown = true;
+    clearInterval(heartbeatTimer);
     logger.info("Shutting down worker.", { signal, workerId });
+    // A deploy stops this process mid-review: hand the job back now rather
+    // than leave it running under a dead worker id.
+    try {
+      const requeued = await runtime.queueScheduler.requeueWorkerJobs(workerId);
+      if (requeued > 0) {
+        logger.info("Requeued in-flight jobs on shutdown.", {
+          workerId,
+          requeued,
+        });
+      }
+    } catch (error) {
+      logger.warn("Failed to requeue in-flight jobs on shutdown.", {
+        workerId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     await Sentry.close(2000);
     process.exit(0);
   };

@@ -388,6 +388,23 @@ export class PostgresJobStore implements JobStore {
     return rows.length > 0;
   }
 
+  async requeueWorkerJobs(workerId: string, requeuedAt: Date): Promise<number> {
+    const rows = await this.#client.unsafe<{ id: string }>(
+      `
+        update jobs
+        set status = 'queued',
+            scheduled_at = $2,
+            started_at = null,
+            worker_id = null,
+            last_error = 'Requeued: the worker stopped while running it.'
+        where status = 'running' and worker_id = $1
+        returning id
+      `,
+      [workerId, requeuedAt],
+    );
+    return rows.length;
+  }
+
   async requeueStaleRunningJobs(input: {
     activeWorkerIds: string[];
     staleStartedBefore: Date;
