@@ -309,7 +309,7 @@ function normalizeFinding(value: unknown): ReviewFinding | null {
   const category = normalizeCategory(candidate.category);
   const title = normalizeString(candidate.title);
   const body = normalizeString(candidate.body);
-  const conciseBody = body ? maybeTrimSentenceCount(body, 2) : undefined;
+  const conciseBody = body ? maybeTrimSentenceCount(body, 3) : undefined;
   const fixPrompt =
     path && line
       ? withScopedFixPrompt(
