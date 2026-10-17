@@ -30,7 +30,7 @@ NITPICKR_MODEL_REASONING_EFFORT=none                          # thinking models:
 # NITPICKR_MEMORY_MODEL=                                      # classifier; defaults to the review model
 # NITPICKR_EMBEDDING_MODEL=nomic-ai/nomic-embed-text-v1.5     # in-process; or "off"
 # NITPICKR_EMBEDDING_DIMENSIONS=768                           # nomic-embed-text-v1.5 = 768 (default)
-NITPICKR_MODEL_REQUEST_TIMEOUT_MS=600000                      # 10 min; output is capped at 6k tokens
+NITPICKR_MODEL_REQUEST_TIMEOUT_MS=1800000                     # 30 min: prefill of a large chunk is slow; loops are cut by the 6k output cap
 NITPICKR_MODEL_MAX_CONCURRENT_REQUESTS=1               # Ollama serves one request at a time
 NITPICKR_REVIEW_CHUNK_MAX_TOTAL_CHARS=160000           # ≈40k tokens per chunk
 NITPICKR_JOB_STALE_AFTER_MS=120000                     # recover a dead worker's job after 2 min
