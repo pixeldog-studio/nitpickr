@@ -336,7 +336,6 @@ export class PostgresJobStore implements JobStore {
     };
   }
 
-  /** Record the queued check run so the worker updates it instead. */
   /**
    * Record the queued check run so the worker updates it instead. False
    * when the job already left the queue (claimed or canceled meanwhile).

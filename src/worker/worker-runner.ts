@@ -1933,6 +1933,20 @@ export class WorkerRunner {
                   (publishableResult.secondLook?.length ?? 0) === 0
                 ? "No further comments."
                 : "nitpickr review completed successfully.";
+        queuedCheck.endedEarly =
+          reviewPlan.files.length === 0
+            ? {
+                kind: "close",
+                conclusion: "neutral",
+                title: "nitpickr review skipped",
+                summary: description,
+              }
+            : {
+                kind: "close",
+                conclusion: "success",
+                title: "nitpickr review completed",
+                summary: description,
+              };
         if (reviewPlan.files.length === 0) {
           const published = await this.#publishReviewStatus(
             "skipped",
@@ -2019,10 +2033,19 @@ export class WorkerRunner {
               : toErrorMessage(error),
         });
       }
+      // The queued check is reused by the retry: the settle step puts it
+      // back to queued. Any other check is completed here.
+      const retryReusesCheck =
+        error instanceof ReviewJobError &&
+        error.retryable &&
+        job.attempts + 1 < job.maxAttempts &&
+        checkRunId !== null &&
+        checkRunId === queuedCheck.checkRunId;
       if (
         statusChecksEnabled &&
         changeRequestContext !== null &&
-        error instanceof ReviewJobError
+        error instanceof ReviewJobError &&
+        !retryReusesCheck
       ) {
         const failureContext = changeRequestContext;
         const published = await this.#publishReviewStatus(
@@ -2048,11 +2071,7 @@ export class WorkerRunner {
               ...(checkRunId ? { checkRunId } : {}),
             }),
         );
-        if (
-          published !== null &&
-          checkRunId === queuedCheck.checkRunId &&
-          !error.retryable
-        ) {
+        if (published !== null && checkRunId === queuedCheck.checkRunId) {
           queuedCheck.settled = true;
         }
         if (published !== null) {

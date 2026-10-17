@@ -223,8 +223,9 @@ export class GitHubWebhookService implements GitHubWebhookHandler {
     ) {
       return;
     }
+    let checkRunId: string | null = null;
     try {
-      const checkRunId = await this.#statusPublisher.markQueued({
+      checkRunId = await this.#statusPublisher.markQueued({
         installationId: event.installationId,
         repository: {
           owner: event.repository.owner,
@@ -258,6 +259,23 @@ export class GitHubWebhookService implements GitHubWebhookHandler {
         jobId: job.id,
         error: toErrorMessage(error, "Unknown status failure."),
       });
+      if (checkRunId !== null) {
+        // Created but not attached: the worker can't find it, so close it.
+        await this.#statusPublisher
+          .markClosed({
+            installationId: event.installationId,
+            repository: {
+              owner: event.repository.owner,
+              name: event.repository.name,
+            },
+            checkRunId,
+            conclusion: "neutral",
+            title: "Handled by another nitpickr check",
+            summary:
+              "nitpickr could not track this check; see the review's own check.",
+          })
+          .catch(() => {});
+      }
     }
   }
 

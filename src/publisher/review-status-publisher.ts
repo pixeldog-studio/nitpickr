@@ -200,17 +200,6 @@ export class ReviewStatusPublisher {
       ? "nitpickr review retry scheduled"
       : "nitpickr review failed";
     const conclusion = input.retryable ? "neutral" : "failure";
-    if (input.checkRunId && input.retryable) {
-      // Completing it would show a result for a review that hasn't ended;
-      // the retry moves the same check to in progress again.
-      await this.markRequeued({
-        installationId: input.installationId,
-        repository: input.repository,
-        checkRunId: input.checkRunId,
-        summary: toOutputSummary(input.description, input.summary),
-      });
-      return;
-    }
     if (input.checkRunId) {
       await this.#publishCompleted({
         ...input,
