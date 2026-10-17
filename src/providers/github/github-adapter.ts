@@ -198,6 +198,7 @@ export interface GitHubApiClient {
       reactionSummary: {
         positiveCount: number;
         negativeCount: number;
+        negativeReactors?: string[];
       };
     }>
   >;
@@ -1045,6 +1046,7 @@ export class GitHubAdapter {
       reactionSummary: {
         positiveCount: number;
         negativeCount: number;
+        negativeReactors?: string[];
       };
     }>
   > {

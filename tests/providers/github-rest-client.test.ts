@@ -489,6 +489,7 @@ describe("GitHubRestClient", () => {
                                     content: "CONFUSED",
                                     users: {
                                       totalCount: 1,
+                                      nodes: [{ login: "maintainer" }],
                                     },
                                   },
                                 ],
@@ -545,6 +546,7 @@ describe("GitHubRestClient", () => {
         reactionSummary: {
           positiveCount: 3,
           negativeCount: 1,
+          negativeReactors: ["maintainer"],
         },
       },
     ]);

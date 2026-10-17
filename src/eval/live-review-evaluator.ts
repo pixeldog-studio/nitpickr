@@ -120,6 +120,7 @@ export const liveEvaluationFixtureSchema = z.object({
           title: z.string().min(1),
           body: z.string(),
           path: z.string().nullable().default(null),
+          category: z.string().nullable().default(null),
         }),
       )
       .default([]),
@@ -411,7 +412,11 @@ export class LiveReviewEvaluator {
       );
       for (const entry of dismissed) {
         const similarity = cosineSimilarity(vector, entry.vector);
-        if (similarity >= dismissalThreshold(finding, entry.path)) {
+        const threshold = dismissalThreshold(finding, {
+          path: entry.path,
+          category: entry.category ?? null,
+        });
+        if (threshold !== null && similarity >= threshold) {
           return `${entry.title} (similarity ${similarity.toFixed(2)})`;
         }
       }

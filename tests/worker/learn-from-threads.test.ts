@@ -30,10 +30,11 @@ function harness(
     deps: {
       job: { id: "job_1", tenantId: "t", repositoryId: "r" },
       logger: noopLogger,
+      trustedReactors: ["owner"],
       fileChangedSince: async () => options.fileChanged ?? false,
       memoryService: {
-        findSimilarDismissals: async () =>
-          options.remembered ? [{ entry: {}, similarity: 0.99 }] : [],
+        findSimilarDismissals: async () => [],
+        hasDismissalFromThread: async () => options.remembered ?? false,
         recordDismissedFinding: async (entry: {
           signal: string;
           title: string;
@@ -90,7 +91,11 @@ describe("learnFromThreads", () => {
     const run = harness(new Set());
     await learnFromThreads({
       ...run.deps,
-      threads: [thread({ reactionSummary: { negativeCount: 1 } })],
+      threads: [
+        thread({
+          reactionSummary: { negativeCount: 1, negativeReactors: ["owner"] },
+        }),
+      ],
     } as never);
     expect(run.dismissals).toEqual([
       { signal: "thumbs_down", title: "fetch has no timeout" },
@@ -120,41 +125,70 @@ describe("learnFromThreads safeguards", () => {
     expect(run.dismissals).toEqual([]);
   });
 
+  it("ignores a thumbs-down from someone other than the author or owner", async () => {
+    const run = harness(new Set());
+    await learnFromThreads({
+      ...run.deps,
+      threads: [
+        thread({
+          reactionSummary: { negativeCount: 1, negativeReactors: ["stranger"] },
+        }),
+      ],
+    } as never);
+    expect(run.dismissals).toEqual([]);
+  });
+
   it("records a thumbs-down only once", async () => {
     const run = harness(new Set(), { remembered: true });
     await learnFromThreads({
       ...run.deps,
-      threads: [thread({ reactionSummary: { negativeCount: 1 } })],
+      threads: [
+        thread({
+          reactionSummary: { negativeCount: 1, negativeReactors: ["owner"] },
+        }),
+      ],
     } as never);
     expect(run.dismissals).toEqual([]);
   });
 });
 
 describe("dismissalThreshold", () => {
-  it("needs a near duplicate for other files and serious findings", () => {
-    const base = dismissalThreshold(
-      { severity: "medium", path: "a.ts" },
-      "a.ts",
+  const at = (severity: string, path: string, dismissedPath: string | null) =>
+    dismissalThreshold(
+      { severity, path, category: "correctness" },
+      { path: dismissedPath, category: "correctness" },
     );
-    expect(base).toBeLessThan(
-      dismissalThreshold({ severity: "medium", path: "a.ts" }, "b.ts"),
-    );
-    expect(base).toBeLessThan(
-      dismissalThreshold({ severity: "critical", path: "a.ts" }, "a.ts"),
-    );
-  });
-});
 
-describe("dismissal thresholds", () => {
+  it("needs a near duplicate for other files and serious findings", () => {
+    const base = at("medium", "a.ts", "a.ts") ?? 0;
+    expect(base).toBeLessThan(at("medium", "a.ts", "b.ts") ?? 0);
+    expect(base).toBeLessThan(at("high", "a.ts", "a.ts") ?? 0);
+  });
+
   it("lets a same-file dismissal hold when the model re-rates it as high", () => {
-    const sameFileHigh = dismissalThreshold(
-      { severity: "high", path: "a.ts" },
-      "a.ts",
-    );
+    const sameFileHigh = at("high", "a.ts", "a.ts") ?? 0;
     expect(sameFileHigh).toBeGreaterThan(0.8); // a related serious finding scored 0.80
     expect(sameFileHigh).toBeLessThan(0.87); // the re-rated repeat scored 0.86-0.89
-    expect(dismissalThreshold({ severity: "high", path: "a.ts" }, "b.ts")).toBe(
-      0.92,
-    );
+    expect(at("high", "a.ts", "b.ts")).toBe(0.92);
+  });
+
+  it("treats a dismissal without a file as another file", () => {
+    expect(at("medium", "a.ts", null)).toBe(0.92);
+  });
+
+  it("never hides critical or security findings, or another kind of finding", () => {
+    expect(at("critical", "a.ts", "a.ts")).toBeNull();
+    expect(
+      dismissalThreshold(
+        { severity: "medium", path: "a.ts", category: "security" },
+        { path: "a.ts", category: "security" },
+      ),
+    ).toBeNull();
+    expect(
+      dismissalThreshold(
+        { severity: "medium", path: "a.ts", category: "correctness" },
+        { path: "a.ts", category: "maintainability" },
+      ),
+    ).toBeNull();
   });
 });

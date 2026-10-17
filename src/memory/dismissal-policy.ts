@@ -23,13 +23,33 @@ export const DISMISSAL_SIMILARITY_SEVERE = 0.92;
  * duplicate.
  */
 export function dismissalThreshold(
-  finding: { severity: string; path: string },
-  dismissedPath: string | null,
-): number {
-  const severe = finding.severity === "high" || finding.severity === "critical";
-  const samePath = dismissedPath === null || dismissedPath === finding.path;
+  finding: { severity: string; path: string; category?: string },
+  dismissed: { path: string | null; category?: string | null },
+): number | null {
+  // Similarity alone never hides a critical or a security finding, nor one
+  // of a different kind than what was dismissed (a dismissed maintainability
+  // note must not silence a correctness bug on the same lines).
+  if (finding.severity === "critical" || finding.category === "security") {
+    return null;
+  }
+  if (
+    dismissed.category &&
+    finding.category &&
+    dismissed.category !== finding.category
+  ) {
+    return null;
+  }
+  const severe = finding.severity === "high";
+  // A dismissal with no file is not "this file": treat it as another file.
+  const samePath = dismissed.path !== null && dismissed.path === finding.path;
   if (!samePath) {
     return DISMISSAL_SIMILARITY_SEVERE;
   }
   return severe ? DISMISSAL_SIMILARITY_SAME_FILE_SEVERE : DISMISSAL_SIMILARITY;
+}
+
+/** The finding category a dismissal was recorded for, from its tags. */
+export function dismissedCategory(tags: string[]): string | null {
+  const tag = tags.find((entry) => entry.startsWith("category:"));
+  return tag ? tag.slice("category:".length) : null;
 }

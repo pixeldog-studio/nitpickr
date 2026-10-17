@@ -9,6 +9,7 @@ import type { DiscussionAcknowledgmentStore } from "../memory/discussion-acknowl
 import {
   DISMISSAL_SIMILARITY,
   dismissalThreshold,
+  dismissedCategory,
 } from "../memory/dismissal-policy.js";
 import type { MemoryEntry, MemoryService } from "../memory/memory-service.js";
 import { captureError } from "../observability/sentry.js";
@@ -1046,7 +1047,11 @@ export interface LearnableThread {
   /** Commit the comment was made on; needed to tell whether code changed. */
   originalCommitSha?: string;
   body: string;
-  reactionSummary: { negativeCount: number };
+  reactionSummary: {
+    negativeCount: number;
+    /** Logins behind the negative reactions, when the provider lists them. */
+    negativeReactors?: string[];
+  };
 }
 
 /**
@@ -1061,7 +1066,12 @@ export async function learnFromThreads(input: {
   threads: LearnableThread[];
   logger: Logger;
   memoryService: Partial<
-    Pick<MemoryService, "recordDismissedFinding" | "findSimilarDismissals">
+    Pick<
+      MemoryService,
+      | "recordDismissedFinding"
+      | "findSimilarDismissals"
+      | "hasDismissalFromThread"
+    >
   >;
   /**
    * Whether `path` changed between `sinceSha` and the PR head. A thread a
@@ -1073,6 +1083,8 @@ export async function learnFromThreads(input: {
   reviewLifecycle: {
     markPublishedCommentsResolved?: (ids: string[]) => Promise<number>;
   };
+  /** Logins whose reactions count (see trustedNegativeReactions). */
+  trustedReactors: string[];
 }): Promise<void> {
   const { job, threads, logger } = input;
   const record = input.memoryService.recordDismissedFinding?.bind(
@@ -1114,6 +1126,8 @@ export async function learnFromThreads(input: {
             title: parsed.title,
             body: parsed.body,
             signal: "resolved_without_change",
+            category: categoryFromFingerprint(thread.fingerprint),
+            sourceThreadId: thread.threadId,
           });
           logger.info("learning.resolved_without_code_change", {
             jobId: job.id,
@@ -1122,19 +1136,21 @@ export async function learnFromThreads(input: {
           continue;
         }
       }
-      // Once per finding: a thumbs-down stays on the thread, so without this
-      // every review would re-record it and creep its confidence up.
+      const trustedThumbsDown = trustedNegativeReactions(
+        thread.reactionSummary.negativeReactors,
+        input.trustedReactors,
+      );
+      // Once per thread: a thumbs-down stays on it, so without this every
+      // review would re-record it and creep its confidence up.
       const alreadyRemembered =
-        thread.reactionSummary.negativeCount > 0 &&
-        (
-          (await input.memoryService.findSimilarDismissals?.({
-            tenantId: job.tenantId,
-            repositoryId: job.repositoryId,
-            text: `${parsed.title}. ${parsed.body}`,
-            minSimilarity: 0.97,
-          })) ?? []
-        ).length > 0;
-      if (thread.reactionSummary.negativeCount > 0 && !alreadyRemembered) {
+        trustedThumbsDown > 0 &&
+        ((await input.memoryService.hasDismissalFromThread?.({
+          tenantId: job.tenantId,
+          repositoryId: job.repositoryId,
+          threadId: thread.threadId,
+        })) ??
+          false);
+      if (trustedThumbsDown > 0 && !alreadyRemembered) {
         await record?.({
           tenantId: job.tenantId,
           repositoryId: job.repositoryId,
@@ -1142,6 +1158,8 @@ export async function learnFromThreads(input: {
           title: parsed.title,
           body: parsed.body,
           signal: "thumbs_down",
+          category: categoryFromFingerprint(thread.fingerprint),
+          sourceThreadId: thread.threadId,
         });
       }
     } catch (error) {
@@ -1162,6 +1180,20 @@ export function memoryPromptText(entry: Pick<MemoryEntry, "kind" | "summary">) {
 }
 
 export { dismissalThreshold };
+
+/**
+ * Who may teach a repo with a reaction: the PR author and the repository
+ * owner. Anyone signed in can react on a public repo, and one 👎 from a
+ * stranger must not silence findings for everyone.
+ */
+export function trustedNegativeReactions(
+  reactors: string[] | undefined,
+  trusted: string[],
+): number {
+  const allowed = new Set(trusted.map((login) => login.toLowerCase()));
+  return (reactors ?? []).filter((login) => allowed.has(login.toLowerCase()))
+    .length;
+}
 
 export class WorkerRunner {
   readonly #logger: Logger;
@@ -1811,6 +1843,10 @@ export class WorkerRunner {
         job,
         threads: existingNitpickrThreads,
         logger,
+        trustedReactors: [
+          context.changeRequest.authorLogin,
+          payload.repository.owner,
+        ],
         ...(compareRange
           ? {
               fileChangedSince: async (path: string, sinceSha: string) =>
@@ -2722,6 +2758,7 @@ export class WorkerRunner {
     job: QueueJob;
     threads: LearnableThread[];
     logger: Logger;
+    trustedReactors: string[];
     fileChangedSince?: (path: string, sinceSha: string) => Promise<boolean>;
   }): Promise<void> {
     await learnFromThreads({
@@ -2745,11 +2782,13 @@ export class WorkerRunner {
         text: `${finding.title}. ${finding.body}`,
         minSimilarity: DISMISSAL_SIMILARITY,
       })) ?? [];
-    const match = matches.find(
-      (candidate) =>
-        candidate.similarity >=
-        dismissalThreshold(finding, candidate.entry.path),
-    );
+    const match = matches.find((candidate) => {
+      const threshold = dismissalThreshold(finding, {
+        path: candidate.entry.path,
+        category: dismissedCategory(candidate.entry.tags),
+      });
+      return threshold !== null && candidate.similarity >= threshold;
+    });
     return match
       ? `${match.entry.summary} (similarity ${match.similarity.toFixed(2)})`
       : null;

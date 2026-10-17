@@ -584,3 +584,75 @@ describe("MemoryService dismissals", () => {
     ).toEqual([]);
   });
 });
+
+describe("dismissal safeguards", () => {
+  const embedder: MemoryEmbedder = {
+    async embed() {
+      return [1, 0, 0];
+    },
+  };
+
+  it("stores a chat-classified dismissal as a prompt note, not a filter", async () => {
+    const store = new InMemoryMemoryStore();
+    const service = new MemoryService(store, {
+      classifier: {
+        async extract() {
+          return {
+            entries: [
+              {
+                kind: "dismissed_finding",
+                summary: "Stop flagging missing timeouts.",
+                tags: [],
+                globs: [],
+                confidence: 0.9,
+              },
+            ],
+            acknowledgment: "ok",
+          };
+        },
+      },
+      createId: () => "m1",
+    });
+    await service.ingestDiscussion({
+      tenantId: "t",
+      repositoryId: "r",
+      discussions: [{ authorLogin: "someone", body: "x", path: null }],
+    });
+    expect(store.entries.map((entry) => entry.kind)).toEqual([
+      "false_positive",
+    ]);
+  });
+
+  it("keeps look-alike dismissals on different files apart", async () => {
+    const store = new InMemoryMemoryStore();
+    let id = 0;
+    const service = new MemoryService(store, {
+      embedder,
+      createId: () => {
+        id += 1;
+        return `m${id}`;
+      },
+    });
+    for (const path of ["a.ts", "b.ts"]) {
+      await service.recordDismissedFinding({
+        tenantId: "t",
+        repositoryId: "r",
+        path,
+        title: "fetch has no timeout",
+        body: "A slow upstream hangs the request.",
+        signal: "thumbs_down",
+        category: "correctness",
+        sourceThreadId: `thread_${path}`,
+      });
+    }
+    expect(store.entries.map((entry) => entry.path)).toEqual(["a.ts", "b.ts"]);
+    expect(
+      await service.hasDismissalFromThread({
+        tenantId: "t",
+        repositoryId: "r",
+        threadId: "thread_b.ts",
+      }),
+    ).toBe(true);
+    expect(store.entries[0]?.tags).toContain("category:correctness");
+  });
+});

@@ -339,6 +339,7 @@ describe("dismissal filter in the eval", () => {
               title: "fetch call has no timeout",
               body: "A slow upstream can hang the request.",
               path: "a.ts",
+              category: null,
             },
           ],
         },
