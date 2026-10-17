@@ -640,6 +640,8 @@ function parseReviewJobPayload(payload: QueueJob["payload"]): {
   headSha: string | null;
   /** The queued check the API created for this job, if any. */
   checkRunId: string | null;
+  /** The commit that check is on. */
+  checkRunSha: string | null;
 } {
   const installationId = payload.installationId;
   const repository = payload.repository as Record<string, unknown> | undefined;
@@ -695,6 +697,10 @@ function parseReviewJobPayload(payload: QueueJob["payload"]): {
     checkRunId:
       typeof payload.checkRunId === "string" && payload.checkRunId.length > 0
         ? payload.checkRunId
+        : null,
+    checkRunSha:
+      typeof payload.checkRunSha === "string" && payload.checkRunSha.length > 0
+        ? payload.checkRunSha
         : null,
   };
 }
@@ -1478,8 +1484,9 @@ export class WorkerRunner {
       const staleCheckRunIds = [
         ...superseded.checkRunIds,
         ...(payload.checkRunId &&
-        payload.headSha !== null &&
-        payload.headSha !== context.changeRequest.headSha
+        (payload.checkRunSha ?? payload.headSha) !== null &&
+        (payload.checkRunSha ?? payload.headSha) !==
+          context.changeRequest.headSha
           ? [payload.checkRunId]
           : []),
       ];

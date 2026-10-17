@@ -160,7 +160,8 @@ export class GitHubWebhookService implements GitHubWebhookHandler {
   readonly #adapter: Pick<
     GitHubAdapter,
     "verifyWebhookSignature" | "normalizeWebhookEvent" | "reactToMention"
-  >;
+  > &
+    Partial<Pick<GitHubAdapter, "getPullRequestHeadSha">>;
   readonly #queueScheduler: Pick<QueueScheduler, "enqueue"> &
     Partial<
       Pick<
@@ -181,7 +182,8 @@ export class GitHubWebhookService implements GitHubWebhookHandler {
     adapter: Pick<
       GitHubAdapter,
       "verifyWebhookSignature" | "normalizeWebhookEvent" | "reactToMention"
-    >,
+    > &
+      Partial<Pick<GitHubAdapter, "getPullRequestHeadSha">>,
     queueScheduler: Pick<QueueScheduler, "enqueue"> &
       Partial<
         Pick<
@@ -222,15 +224,32 @@ export class GitHubWebhookService implements GitHubWebhookHandler {
     deliveryId: string | undefined,
     logger: Logger,
   ): Promise<void> {
-    const headSha = job.payload.headSha;
     if (
       this.#statusPublisher === null ||
       !this.#queueScheduler.attachCheckRun ||
       job.status !== "queued" ||
-      typeof headSha !== "string" ||
-      headSha.length === 0 ||
+      // A redelivered webhook finds the job it created already tracked.
+      typeof job.payload.checkRunId === "string" ||
       (deliveryId !== undefined && job.payload.correlationId !== deliveryId)
     ) {
+      return;
+    }
+    // Comment commands (@nitpickr review) carry no commit: show the check on
+    // the PR's current head, or the PR keeps showing the previous result.
+    const headSha =
+      typeof job.payload.headSha === "string" && job.payload.headSha.length > 0
+        ? job.payload.headSha
+        : await this.#adapter
+            .getPullRequestHeadSha?.({
+              installationId: event.installationId,
+              repository: {
+                owner: event.repository.owner,
+                name: event.repository.name,
+              },
+              pullNumber: event.pullNumber,
+            })
+            .catch(() => null);
+    if (typeof headSha !== "string" || headSha.length === 0) {
       return;
     }
     let checkRunId: string | null = null;
@@ -247,6 +266,7 @@ export class GitHubWebhookService implements GitHubWebhookHandler {
       const attached = await this.#queueScheduler.attachCheckRun(
         job.id,
         checkRunId,
+        headSha,
       );
       if (!attached) {
         // A worker took the job (and opened its own check) or a newer push
