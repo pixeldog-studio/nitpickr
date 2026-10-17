@@ -124,6 +124,9 @@ export function describeReviewFailure(error: unknown): string {
   if (/token cap|length limit/i.test(message)) {
     return "the model's reply kept running past its length limit";
   }
+  if (/stopped serving/i.test(message)) {
+    return "the local model server stopped serving the model (it usually needs a restart)";
+  }
   if (/fetch failed|ECONNREFUSED|ECONNRESET|socket hang up/i.test(message)) {
     return "the local model server wasn't reachable";
   }

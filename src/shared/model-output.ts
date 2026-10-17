@@ -28,6 +28,19 @@ export class TruncatedOutputError extends ModelOutputError {
   }
 }
 
+/**
+ * The model server stopped serving the model (seen with Ollama: after a
+ * swap to another client's model, its scheduler never loaded ours again and
+ * every request hung until the timeout). Retryable: it usually recovers or
+ * gets restarted.
+ */
+export class ModelServerStalledError extends ModelOutputError {
+  constructor(message: string) {
+    super(message);
+    this.name = "ModelServerStalledError";
+  }
+}
+
 export type JsonExtraction =
   | { ok: true; value: unknown }
   | { ok: false; reason: string };

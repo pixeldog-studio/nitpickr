@@ -4,6 +4,7 @@ import {
   type ResponseJsonSchema,
   toResponseSchema,
 } from "../shared/chat-completion-client.js";
+import { ModelServerStalledError } from "../shared/model-output.js";
 import { evidenceAppearsInCode, type Severity } from "./evidence-gate.js";
 import type { RelatedSnippet } from "./related-code.js";
 import {
@@ -263,6 +264,11 @@ export async function verifyFinding(
     });
     return decideVerification(reply, file);
   } catch (error) {
+    // A stuck model server fails every later call too: stop the review now
+    // instead of waiting out the watch once per finding.
+    if (error instanceof ModelServerStalledError) {
+      throw error;
+    }
     return {
       verdict: "unverified",
       reason: `verifier error: ${error instanceof Error ? error.message : String(error)}`,

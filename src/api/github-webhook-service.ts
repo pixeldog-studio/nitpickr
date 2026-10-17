@@ -137,7 +137,8 @@ function buildInteractionJobInput(
     repositoryId: event.repository.repositoryId,
     changeRequestId: `${event.repository.repositoryId}:${event.pullNumber}`,
     dedupeKey: `${event.repository.repositoryId}:${event.pullNumber}:${event.command}:${event.source.commentId}`,
-    priority: 80,
+    // Questions take about a minute; don't make them wait behind reviews.
+    priority: 120,
     payload: {
       correlationId,
       installationId: event.installationId,

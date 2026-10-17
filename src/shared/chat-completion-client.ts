@@ -8,7 +8,11 @@ import {
   isTimeoutError,
 } from "./http-client.js";
 import { normalizeModelBaseUrl } from "./model-base-url.js";
-import { ModelOutputError, TruncatedOutputError } from "./model-output.js";
+import {
+  ModelOutputError,
+  ModelServerStalledError,
+  TruncatedOutputError,
+} from "./model-output.js";
 
 /**
  * Minimal client for the `/v1/chat/completions` protocol spoken by local
@@ -23,6 +27,16 @@ import { ModelOutputError, TruncatedOutputError } from "./model-output.js";
  */
 export const DEFAULT_MAX_OUTPUT_TOKENS = 6_000;
 
+/** Ollama reports "qwen3.8" as "qwen3.8:latest"; compare like it does. */
+function canonicalModelName(name: string): string {
+  const lower = name.trim().toLowerCase();
+  const lastSegment = lower.slice(lower.lastIndexOf("/") + 1);
+  return lastSegment.includes(":") ? lower : `${lower}:latest`;
+}
+
+/** Give up after the model has been missing from Ollama for ~3 minutes. */
+export const DEFAULT_STALL_WATCH = { intervalMs: 60_000, maxMissing: 3 };
+
 export interface ChatCompletionClientConfig {
   baseUrl: string;
   model: string;
@@ -34,6 +48,12 @@ export interface ChatCompletionClientConfig {
   timeoutMs?: number;
   /** Sent as `max_tokens`; defaults to DEFAULT_MAX_OUTPUT_TOKENS. */
   maxOutputTokens?: number;
+  /**
+   * While a request runs, check Ollama's `/api/ps` every `intervalMs`; give
+   * up once the model has been missing `maxMissing` times in a row. Turns
+   * itself off when the server has no such endpoint. `false` disables it.
+   */
+  stallWatch?: { intervalMs: number; maxMissing: number } | false;
   logger?: Logger;
 }
 
@@ -81,6 +101,74 @@ export class ChatCompletionClient {
     return this.#config.model;
   }
 
+  /**
+   * Abort `stall` when Ollama reports the model as not loaded for too long.
+   * A slow prompt still shows the model as loaded, so only a stuck server
+   * (or one that unloaded the model mid-request) trips this.
+   */
+  #watchForStall(stall: AbortController): () => void {
+    const watch =
+      this.#config.stallWatch === undefined
+        ? DEFAULT_STALL_WATCH
+        : this.#config.stallWatch;
+    if (watch === false) {
+      return () => {};
+    }
+    const origin = this.#endpoint.replace(/\/v1\/chat\/completions$/, "");
+    let missing = 0;
+    let active = true;
+    const timer = setInterval(() => {
+      void (async () => {
+        try {
+          const response = await this.#fetch(`${origin}/api/ps`, {
+            method: "GET",
+            signal: AbortSignal.timeout(5_000),
+          });
+          if (!response.ok) {
+            // Not Ollama (or no such endpoint): nothing to watch.
+            clearInterval(timer);
+            return;
+          }
+          const payload = (await response.json()) as {
+            models?: Array<{ name?: string; model?: string }>;
+          };
+          if (!Array.isArray(payload.models)) {
+            clearInterval(timer);
+            return;
+          }
+          const wanted = canonicalModelName(this.#config.model);
+          const loaded = payload.models.some(
+            (entry) =>
+              canonicalModelName(entry.name ?? "") === wanted ||
+              canonicalModelName(entry.model ?? "") === wanted,
+          );
+          if (!loaded && missing === 0) {
+            this.#logger.warn("model.chat_completion model_not_loaded", {
+              model: this.#config.model,
+              loaded: payload.models.map((entry) => entry.name ?? entry.model),
+            });
+          }
+          missing = loaded ? 0 : missing + 1;
+          if (active && missing >= watch.maxMissing) {
+            this.#logger.error("model.chat_completion stalled", {
+              model: this.#config.model,
+              missingChecks: missing,
+            });
+            stall.abort();
+            clearInterval(timer);
+          }
+        } catch {
+          // A failed probe proves nothing; the request timeout still applies.
+        }
+      })();
+    }, watch.intervalMs);
+    timer.unref?.();
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }
+
   async complete(input: {
     messages: ChatMessage[];
     temperature?: number;
@@ -95,6 +183,8 @@ export class ChatCompletionClient {
       Number((process.hrtime.bigint() - startedAt) / 1_000_000n);
 
     this.#logger.debug("model.chat_completion started", {});
+    const stall = new AbortController();
+    const stopWatch = this.#watchForStall(stall);
     let response: Response;
     try {
       response = await this.#fetch(this.#endpoint, {
@@ -105,9 +195,12 @@ export class ChatCompletionClient {
             : {}),
           "content-type": "application/json",
         },
-        ...(this.#config.timeoutMs
-          ? { signal: AbortSignal.timeout(this.#config.timeoutMs) }
-          : {}),
+        signal: this.#config.timeoutMs
+          ? AbortSignal.any([
+              stall.signal,
+              AbortSignal.timeout(this.#config.timeoutMs),
+            ])
+          : stall.signal,
         body: JSON.stringify({
           model: this.#config.model,
           max_tokens:
@@ -143,12 +236,19 @@ export class ChatCompletionClient {
         durationMs: elapsedMs(),
         errorMessage: error instanceof Error ? error.message : String(error),
       });
+      if (stall.signal.aborted) {
+        throw new ModelServerStalledError(
+          `The model server stopped serving ${this.#config.model}.`,
+        );
+      }
       if (isTimeoutError(error)) {
         throw new ModelOutputError(
           `Model request timed out after ${this.#config.timeoutMs}ms.`,
         );
       }
       throw error;
+    } finally {
+      stopWatch();
     }
 
     if (!response.ok) {
