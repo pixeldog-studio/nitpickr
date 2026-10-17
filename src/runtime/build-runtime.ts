@@ -171,6 +171,7 @@ export function buildRuntime(
       {
         maxConcurrentModelRequests: models.maxConcurrentRequests,
         maxTotalCharactersPerChunk: models.reviewChunkMaxTotalChars,
+        inlinePolicy: models.inlinePolicy,
         verifier:
           models.verifierMaxFindings === null
             ? null

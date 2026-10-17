@@ -678,6 +678,11 @@ export interface ReviewEngineResult {
   summary: string;
   mermaid: string;
   findings: ReviewFinding[];
+  /**
+   * With the `confirmed` inline policy: findings the verifier did not
+   * confirm, listed in the summary instead of posted as inline comments.
+   */
+  secondLook?: ReviewFinding[];
   /** Verdicts for prior threads that needed one; unknown ids are dropped. */
   priorThreadVerdicts?: Array<{
     threadId: string;
@@ -716,6 +721,12 @@ export interface ReviewEngineOptions {
    * ones drop, uncertain ones lose one severity level. Off when null/absent.
    */
   verifier?: { maxFindings: number } | null;
+  /**
+   * `all` (default): every surviving finding is an inline comment.
+   * `confirmed`: only verifier-confirmed (or unverifiable) findings are
+   * inline; the rest go to a "worth a second look" list in the summary.
+   */
+  inlinePolicy?: "all" | "confirmed";
 }
 
 export const DEFAULT_MAX_PATCH_CHARACTERS_PER_CHUNK = 16_000;
@@ -921,6 +932,7 @@ export class ReviewEngine {
   readonly #maxConcurrentModelRequests: number;
   readonly #requireEvidence: boolean;
   readonly #verifier: { maxFindings: number } | null;
+  readonly #inlinePolicy: "all" | "confirmed";
 
   constructor(model: ReviewModel, options: ReviewEngineOptions = {}) {
     this.#model = model;
@@ -937,6 +949,24 @@ export class ReviewEngine {
       DEFAULT_MAX_CONCURRENT_MODEL_REQUESTS;
     this.#requireEvidence = options.requireEvidence ?? true;
     this.#verifier = options.verifier ?? null;
+    this.#inlinePolicy = options.inlinePolicy ?? "all";
+  }
+
+  #splitByInlinePolicy(findings: ReviewFinding[]): {
+    findings: ReviewFinding[];
+    secondLook?: ReviewFinding[];
+  } {
+    if (this.#inlinePolicy === "all" || this.#verifier === null) {
+      return { findings };
+    }
+    const inline = findings.filter(
+      (finding) =>
+        finding.verification === undefined ||
+        finding.verification.verdict === "confirmed" ||
+        finding.verification.verdict === "unverified",
+    );
+    const secondLook = findings.filter((finding) => !inline.includes(finding));
+    return { findings: inline, secondLook };
   }
 
   /**
@@ -1218,7 +1248,9 @@ export class ReviewEngine {
     return {
       result: {
         ...reviewed.result,
-        findings: verified.kept.slice(0, input.commentBudget),
+        ...this.#splitByInlinePolicy(
+          verified.kept.slice(0, input.commentBudget),
+        ),
       },
       rejectedFindings: [
         ...gatedFindings.rejectedFindings,

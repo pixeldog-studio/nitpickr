@@ -44,6 +44,7 @@ const bootstrapEnvironmentSchema = z.object({
   NITPICKR_MODEL_MAX_CONCURRENT_REQUESTS: z.string().optional(),
   NITPICKR_REVIEW_CHUNK_MAX_TOTAL_CHARS: z.string().optional(),
   NITPICKR_VERIFIER_MAX_FINDINGS: z.string().optional(),
+  NITPICKR_INLINE_POLICY: z.enum(["all", "confirmed"]).optional(),
   GITHUB_API_BASE_URL: z.string().url().optional(),
   GITHUB_BOT_LOGINS: z.string().min(1).optional(),
   NITPICKR_BASE_URL: z.string().url().optional(),
@@ -106,6 +107,8 @@ export interface ModelSettings {
   reviewChunkMaxTotalChars: number;
   /** null = verifier off (`NITPICKR_VERIFIER_MAX_FINDINGS=off`). */
   verifierMaxFindings: number | null;
+  /** Which findings become inline comments (see ReviewEngineOptions). */
+  inlinePolicy: "all" | "confirmed";
 }
 
 export interface BootstrapConfig {
@@ -303,6 +306,7 @@ function parseModelSettings(parsed: BootstrapEnvironment): ModelSettings {
       "NITPICKR_REVIEW_CHUNK_MAX_TOTAL_CHARS",
       DEFAULT_REVIEW_CHUNK_MAX_TOTAL_CHARS,
     ),
+    inlinePolicy: parsed.NITPICKR_INLINE_POLICY ?? "all",
     verifierMaxFindings:
       parsed.NITPICKR_VERIFIER_MAX_FINDINGS?.trim().toLowerCase() === "off"
         ? null

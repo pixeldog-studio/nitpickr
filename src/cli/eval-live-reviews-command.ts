@@ -72,6 +72,7 @@ export function formatTotals(
     `precision(medium+) ${pct(totals.precisionMediumPlus)}`,
     `precision ${pct(totals.precision)} (${totals.matched}/${totals.published})`,
     `recall ${pct(totals.recall)} (${totals.matched}/${totals.expected})`,
+    `recall+second-look ${pct(totals.recallIncludingSecondLook)}`,
     `nits ${totals.nitCount}`,
     `clean-case FPs ${totals.cleanCaseFalsePositives}`,
     `verdicts ${totals.verdictAccuracy === null ? "n/a" : pct(totals.verdictAccuracy)}`,

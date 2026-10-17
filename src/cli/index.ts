@@ -92,6 +92,7 @@ async function main(): Promise<void> {
         engineOptions: {
           maxConcurrentModelRequests: bootstrap.models.maxConcurrentRequests,
           maxTotalCharactersPerChunk: bootstrap.models.reviewChunkMaxTotalChars,
+          inlinePolicy: bootstrap.models.inlinePolicy,
           verifier:
             bootstrap.models.verifierMaxFindings === null
               ? null

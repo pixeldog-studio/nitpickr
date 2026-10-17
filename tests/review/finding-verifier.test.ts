@@ -351,3 +351,65 @@ describe("collapseNearbyFindings", () => {
     expect(result.collapsed.map((entry) => entry.title)).toEqual(["same spot"]);
   });
 });
+
+describe("inline policy", () => {
+  it("keeps only confirmed findings inline and lists the rest for a second look", async () => {
+    const make = (title: string, line: number) => ({
+      path: "src/users.ts",
+      line,
+      findingType: "bug",
+      severity: "high",
+      category: "security",
+      title,
+      evidence: "deleteUser(user.id);",
+      failureScenario: "x",
+      body: `${title}.`,
+      fixPrompt: `In src/users.ts around line ${line}, fix.`,
+      suggestedChange: null,
+    });
+    const model: ReviewModel = {
+      async generateStructuredReview(input) {
+        if (input.jsonSchema?.name === "nitpickr_verification") {
+          return input.user.includes("Title: Confirmed one")
+            ? {
+                verdict: "confirmed",
+                quotedLines: ["deleteUser(user.id);"],
+                failureScenario: "any user deletes any account",
+                refutationReason: "",
+                confidence: "high",
+              }
+            : {
+                verdict: "uncertain",
+                quotedLines: [],
+                failureScenario: "",
+                refutationReason: "depends on caller",
+                confidence: "low",
+              };
+        }
+        return {
+          summary: "s",
+          findings: [make("Confirmed one", 7), make("Unconfirmed one", 12)],
+          priorThreadVerdicts: [],
+        };
+      },
+    };
+    const result = await new ReviewEngine(model, {
+      verifier: { maxFindings: 6 },
+      inlinePolicy: "confirmed",
+    }).reviewWithDiagnostics({
+      changeRequest: { title: "t", number: 1 },
+      files: [{ ...wideFile, additions: 12, deletions: 0 }],
+      instructionText: "",
+      memory: [],
+      commentBudget: 5,
+      severityFloor: "medium",
+    });
+
+    expect(result.result.findings.map((entry) => entry.title)).toEqual([
+      "Confirmed one",
+    ]);
+    expect(result.result.secondLook?.map((entry) => entry.title)).toEqual([
+      "Unconfirmed one",
+    ]);
+  });
+});

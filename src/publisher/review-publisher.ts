@@ -102,6 +102,27 @@ const categoryEmoji: Record<PublishedFinding["category"], string> = {
   style: "🎨",
 };
 
+/**
+ * Findings the verifier could not confirm: still worth knowing about, but
+ * not worth interrupting someone with an inline comment.
+ */
+export function renderSecondLook(findings: PublishedFinding[]): string | null {
+  if (findings.length === 0) {
+    return null;
+  }
+  return [
+    "<details>",
+    `<summary>Worth a second look (${findings.length}, not confirmed)</summary>`,
+    "",
+    ...findings.map(
+      (finding) =>
+        `- \`${finding.path}:${finding.line}\` **${finding.title}**: ${finding.body}`,
+    ),
+    "",
+    "</details>",
+  ].join("\n");
+}
+
 function escapeMarkdownTableCell(value: string): string {
   return value.replace(/\|/g, "\\|").trim();
 }
@@ -650,6 +671,8 @@ export class ReviewPublisher {
       summary: string;
       mermaid: string;
       findings: PublishedFinding[];
+      /** Lower-confidence findings listed in the review body, not inline. */
+      secondLook?: PublishedFinding[];
     };
     files?: Array<{
       path: string;
@@ -719,6 +742,8 @@ export class ReviewPublisher {
               findings: input.result.findings,
             });
 
+    const secondLook = renderSecondLook(input.result.secondLook ?? []);
+    const fullBody = secondLook === null ? body : `${body}\n\n${secondLook}`;
     const providerComments = toProviderReviewComments(comments);
 
     try {
@@ -726,7 +751,7 @@ export class ReviewPublisher {
         installationId: input.installationId,
         repository: input.repository,
         pullNumber: input.pullNumber,
-        body,
+        body: fullBody,
         comments: providerComments,
       });
     } catch (error) {
@@ -738,7 +763,7 @@ export class ReviewPublisher {
           installationId: input.installationId,
           repository: input.repository,
           pullNumber: input.pullNumber,
-          body,
+          body: fullBody,
           comments: [],
         });
       }

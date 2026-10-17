@@ -982,3 +982,30 @@ describe("ReviewPublisher", () => {
     ).rejects.toThrow(/owner/i);
   });
 });
+
+describe("second look list", () => {
+  it("renders unconfirmed findings as a collapsed list", async () => {
+    const { renderSecondLook } = await import(
+      "../../src/publisher/review-publisher.js"
+    );
+    expect(renderSecondLook([])).toBeNull();
+    const block = renderSecondLook([
+      {
+        path: "a.ts",
+        line: 3,
+        findingType: "bug",
+        severity: "medium",
+        category: "correctness",
+        title: "Maybe a race",
+        body: "Two writers could interleave.",
+        fixPrompt: "x",
+      },
+    ]);
+    expect(block).toContain(
+      "<summary>Worth a second look (1, not confirmed)</summary>",
+    );
+    expect(block).toContain(
+      "- `a.ts:3` **Maybe a race**: Two writers could interleave.",
+    );
+  });
+});

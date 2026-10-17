@@ -137,6 +137,11 @@ export interface LiveCaseReport {
   nitCount: number;
   verdictsExpected: number;
   verdictsCorrect: number;
+  /** Expectations matched by inline or second-look findings. */
+  matchedIncludingSecondLook?: number;
+  secondLook?: Array<
+    Pick<ReviewFinding, "path" | "line" | "severity" | "category" | "title">
+  >;
   durationMs: number;
   modelCalls: number;
   promptTokens: number | null;
@@ -176,6 +181,8 @@ export interface LiveEvaluationTotals {
   recall: number;
   /** Precision over medium+ findings only (the goal's headline number). */
   precisionMediumPlus: number;
+  /** Recall when the summary's "worth a second look" list counts too. */
+  recallIncludingSecondLook: number;
   nitCount: number;
   /** Findings published on cases that expect none. */
   cleanCaseFalsePositives: number;
@@ -415,6 +422,11 @@ export class LiveReviewEvaluator {
         findings,
         fixture.expectedFindings,
       );
+      const secondLook = diagnostics.result.secondLook ?? [];
+      const withSecondLook = matchFindings(
+        [...findings, ...secondLook],
+        fixture.expectedFindings,
+      );
       const verdicts = new Map(
         (
           (
@@ -435,6 +447,14 @@ export class LiveReviewEvaluator {
         ).length,
         publishedMediumPlus: findings.filter(isMediumPlus).length,
         nitCount: findings.filter(isNit).length,
+        matchedIncludingSecondLook: withSecondLook.matched.length,
+        secondLook: secondLook.map((finding) => ({
+          path: finding.path,
+          line: finding.line,
+          severity: finding.severity,
+          category: finding.category,
+          title: finding.title,
+        })),
         verdictsCorrect: fixture.expectedVerdicts.filter(
           (entry) => verdicts.get(entry.threadId) === entry.verdict,
         ).length,
@@ -519,8 +539,13 @@ export function rescoreReport(
       findings,
       fixture.expectedFindings,
     );
+    const withSecondLook = matchFindings(
+      [...findings, ...((entry.secondLook ?? []) as ReviewFinding[])],
+      fixture.expectedFindings,
+    );
     const rescored: LiveCaseReport = {
       ...entry,
+      matchedIncludingSecondLook: withSecondLook.matched.length,
       kind: fixture.kind,
       stack: fixture.stack,
       matched: matched.map((item) => ({
@@ -588,6 +613,13 @@ export function summarizeCases(
     recall: expected === 0 ? 1 : matched / expected,
     precisionMediumPlus:
       publishedMediumPlus === 0 ? 1 : matchedMediumPlus / publishedMediumPlus,
+    recallIncludingSecondLook:
+      expected === 0
+        ? 1
+        : sum(
+            cases,
+            (entry) => entry.matchedIncludingSecondLook ?? entry.matched.length,
+          ) / expected,
     nitCount: sum(cases, (entry) => entry.nitCount),
     cleanCaseFalsePositives: sum(cases, (entry) =>
       entry.matched.length + entry.missed.length === 0
