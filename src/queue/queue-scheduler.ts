@@ -70,7 +70,7 @@ export interface JobStore {
     /** Only jobs queued before the running one; newer pushes keep theirs. */
     createdBefore: Date;
   }): Promise<{ canceledCount: number; checkRunIds: string[] }>;
-  setJobCheckRun(jobId: string, checkRunId: string): Promise<void>;
+  setJobCheckRun(jobId: string, checkRunId: string): Promise<boolean>;
   requeueStaleRunningJobs(input: {
     activeWorkerIds: string[];
     staleStartedBefore: Date;
@@ -208,10 +208,10 @@ export class QueueScheduler {
     return this.#store.cancelSupersededReviewJobs(input);
   }
 
-  async attachCheckRun(jobId: string, checkRunId: string): Promise<void> {
+  async attachCheckRun(jobId: string, checkRunId: string): Promise<boolean> {
     assertNonEmpty(jobId, "jobId");
     assertNonEmpty(checkRunId, "checkRunId");
-    await this.#store.setJobCheckRun(jobId, checkRunId);
+    return this.#store.setJobCheckRun(jobId, checkRunId);
   }
 
   async recoverStaleRunningJobs(input: {

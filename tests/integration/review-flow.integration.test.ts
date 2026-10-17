@@ -163,7 +163,9 @@ class InMemoryJobStore implements JobStore {
     return { canceledCount: canceled, checkRunIds: [] };
   }
 
-  async setJobCheckRun(): Promise<void> {}
+  async setJobCheckRun(): Promise<boolean> {
+    return true;
+  }
 
   async requeueStaleRunningJobs(): Promise<number> {
     return 0;

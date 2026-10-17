@@ -300,6 +300,7 @@ describe("GitHubWebhookService", () => {
     const queue = Object.assign(new FakeQueueScheduler(), {
       async attachCheckRun(jobId: string, checkRunId: string) {
         attached.push([jobId, checkRunId]);
+        return true;
       },
     });
     const service = new GitHubWebhookService(
@@ -313,6 +314,7 @@ describe("GitHubWebhookService", () => {
             queued.push({ sha: input.sha, externalId: input.externalId });
             return "check_9";
           },
+          async markClosed() {},
         },
       },
     );
@@ -347,7 +349,7 @@ describe("GitHubWebhookService", () => {
     let queuedCalls = 0;
     const service = new GitHubWebhookService(
       adapter,
-      Object.assign(queue, { attachCheckRun: async () => {} }),
+      Object.assign(queue, { attachCheckRun: async () => true }),
       new FakeWebhookEventService(),
       new FakeLogger(),
       {
@@ -356,6 +358,7 @@ describe("GitHubWebhookService", () => {
             queuedCalls += 1;
             return "x";
           },
+          async markClosed() {},
         },
       },
     );
@@ -367,6 +370,42 @@ describe("GitHubWebhookService", () => {
       payload: {},
     });
     expect(queuedCalls).toBe(0);
+  });
+
+  it("closes its queued check when a worker took the job first", async () => {
+    const adapter = new FakeGitHubAdapter();
+    adapter.normalizedEvent = {
+      ...adapter.normalizedEvent,
+      kind: "review_requested",
+      trigger: { type: "pr_synchronized", actorLogin: "ruben" },
+      mode: "quick",
+      headSha: "d".repeat(40),
+    } as GitHubNormalizedEvent;
+    const closed: string[] = [];
+    const service = new GitHubWebhookService(
+      adapter,
+      Object.assign(new FakeQueueScheduler(), {
+        attachCheckRun: async () => false,
+      }),
+      new FakeWebhookEventService(),
+      new FakeLogger(),
+      {
+        statusPublisher: {
+          markQueued: async () => "late_check",
+          async markClosed(input) {
+            closed.push(input.checkRunId);
+          },
+        },
+      },
+    );
+    await service.handle({
+      deliveryId: "delivery-sync",
+      eventName: "pull_request",
+      signature: "sha256=test",
+      rawBody: "{}",
+      payload: {},
+    });
+    expect(closed).toEqual(["late_check"]);
   });
 
   it("reacts to issue comment mentions before queueing work", async () => {

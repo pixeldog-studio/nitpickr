@@ -337,15 +337,21 @@ export class PostgresJobStore implements JobStore {
   }
 
   /** Record the queued check run so the worker updates it instead. */
-  async setJobCheckRun(jobId: string, checkRunId: string): Promise<void> {
-    await this.#client.unsafe(
+  /**
+   * Record the queued check run so the worker updates it instead. False
+   * when the job already left the queue (claimed or canceled meanwhile).
+   */
+  async setJobCheckRun(jobId: string, checkRunId: string): Promise<boolean> {
+    const rows = await this.#client.unsafe<{ id: string }>(
       `
         update jobs
         set payload = payload || jsonb_build_object('checkRunId', $2::text)
-        where id = $1
+        where id = $1 and status = 'queued'
+        returning id
       `,
       [jobId, checkRunId],
     );
+    return rows.length > 0;
   }
 
   async requeueStaleRunningJobs(input: {

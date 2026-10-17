@@ -163,7 +163,10 @@ export class GitHubWebhookService implements GitHubWebhookHandler {
   >;
   readonly #queueScheduler: Pick<QueueScheduler, "enqueue"> &
     Partial<Pick<QueueScheduler, "attachCheckRun">>;
-  readonly #statusPublisher: Pick<ReviewStatusPublisher, "markQueued"> | null;
+  readonly #statusPublisher: Pick<
+    ReviewStatusPublisher,
+    "markQueued" | "markClosed"
+  > | null;
   readonly #logger: Logger;
   readonly #webhookEventService: WebhookEventTracker;
   /** Lower-cased `owner/name` entries; `null` allows every repository. */
@@ -180,7 +183,10 @@ export class GitHubWebhookService implements GitHubWebhookHandler {
     logger: Logger = noopLogger,
     options: {
       repositoryAllowlist?: string[] | null;
-      statusPublisher?: Pick<ReviewStatusPublisher, "markQueued"> | null;
+      statusPublisher?: Pick<
+        ReviewStatusPublisher,
+        "markQueued" | "markClosed"
+      > | null;
     } = {},
   ) {
     this.#adapter = adapter;
@@ -227,7 +233,26 @@ export class GitHubWebhookService implements GitHubWebhookHandler {
         sha: headSha,
         externalId: job.id,
       });
-      await this.#queueScheduler.attachCheckRun(job.id, checkRunId);
+      const attached = await this.#queueScheduler.attachCheckRun(
+        job.id,
+        checkRunId,
+      );
+      if (!attached) {
+        // A worker took the job (and opened its own check) or a newer push
+        // canceled it while this check was being created.
+        await this.#statusPublisher.markClosed({
+          installationId: event.installationId,
+          repository: {
+            owner: event.repository.owner,
+            name: event.repository.name,
+          },
+          checkRunId,
+          conclusion: "neutral",
+          title: "Handled by another nitpickr check",
+          summary:
+            "This review already started or was replaced by a newer push.",
+        });
+      }
     } catch (error) {
       logger.warn("Failed to publish queued review status.", {
         jobId: job.id,

@@ -87,14 +87,48 @@ export class ReviewStatusPublisher {
     repository: { owner: string; name: string };
     checkRunId: string;
   }): Promise<void> {
+    await this.markClosed({
+      ...input,
+      conclusion: "neutral",
+      title: "Superseded by a newer push",
+      summary: "nitpickr reviews the latest commit instead of this one.",
+    });
+  }
+
+  /** Close a check with a final state and the reason. */
+  async markClosed(input: {
+    installationId: string;
+    repository: { owner: string; name: string };
+    checkRunId: string;
+    conclusion: "success" | "neutral" | "failure";
+    title: string;
+    summary: string;
+  }): Promise<void> {
     await this.#client.updateCheckRun({
       installationId: input.installationId,
       repository: input.repository,
       checkRunId: input.checkRunId,
       status: "completed",
-      conclusion: "neutral",
-      title: "Superseded by a newer push",
-      summary: "nitpickr reviews the latest commit instead of this one.",
+      conclusion: input.conclusion,
+      title: input.title,
+      summary: input.summary,
+    });
+  }
+
+  /** Back to queued while the job waits for its retry. */
+  async markRequeued(input: {
+    installationId: string;
+    repository: { owner: string; name: string };
+    checkRunId: string;
+    summary: string;
+  }): Promise<void> {
+    await this.#client.updateCheckRun({
+      installationId: input.installationId,
+      repository: input.repository,
+      checkRunId: input.checkRunId,
+      status: "queued",
+      title: "nitpickr review retry scheduled",
+      summary: input.summary,
     });
   }
 
@@ -166,6 +200,17 @@ export class ReviewStatusPublisher {
       ? "nitpickr review retry scheduled"
       : "nitpickr review failed";
     const conclusion = input.retryable ? "neutral" : "failure";
+    if (input.checkRunId && input.retryable) {
+      // Completing it would show a result for a review that hasn't ended;
+      // the retry moves the same check to in progress again.
+      await this.markRequeued({
+        installationId: input.installationId,
+        repository: input.repository,
+        checkRunId: input.checkRunId,
+        summary: toOutputSummary(input.description, input.summary),
+      });
+      return;
+    }
     if (input.checkRunId) {
       await this.#publishCompleted({
         ...input,
