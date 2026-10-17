@@ -565,7 +565,8 @@ type ReviewStatusPhase = "pending" | "published" | "skipped" | "failed";
 const noopStatusPublisher: Pick<
   ReviewStatusPublisher,
   "markFailed" | "markPending" | "markPublished" | "markSkipped"
-> = {
+> &
+  Partial<Pick<ReviewStatusPublisher, "markSuperseded">> = {
   async markFailed() {
     return undefined;
   },
@@ -588,6 +589,8 @@ function parseReviewJobPayload(payload: QueueJob["payload"]): {
   trigger: ReturnType<typeof parseReviewTrigger>;
   /** Commit the job was queued for; null for comment commands. */
   headSha: string | null;
+  /** The queued check the API created for this job, if any. */
+  checkRunId: string | null;
 } {
   const installationId = payload.installationId;
   const repository = payload.repository as Record<string, unknown> | undefined;
@@ -639,6 +642,10 @@ function parseReviewJobPayload(payload: QueueJob["payload"]): {
     headSha:
       typeof payload.headSha === "string" && payload.headSha.length > 0
         ? payload.headSha
+        : null,
+    checkRunId:
+      typeof payload.checkRunId === "string" && payload.checkRunId.length > 0
+        ? payload.checkRunId
         : null,
   };
 }
@@ -950,7 +957,8 @@ export interface WorkerRunnerDependencies {
   statusPublisher?: Pick<
     ReviewStatusPublisher,
     "markFailed" | "markPending" | "markPublished" | "markSkipped"
-  >;
+  > &
+    Partial<Pick<ReviewStatusPublisher, "markSuperseded">>;
 }
 
 export class WorkerRunner {
@@ -974,7 +982,8 @@ export class WorkerRunner {
   readonly #statusPublisher: Pick<
     ReviewStatusPublisher,
     "markFailed" | "markPending" | "markPublished" | "markSkipped"
-  >;
+  > &
+    Partial<Pick<ReviewStatusPublisher, "markSuperseded">>;
   readonly #discussionAcknowledgmentStore: DiscussionAcknowledgmentStore | null;
   readonly #now: () => Date;
   readonly #repositoryAllowlist: Set<string> | null;
@@ -1214,22 +1223,56 @@ export class WorkerRunner {
             })()
           : context.files;
 
-      const supersededCount =
-        await this.#queueScheduler.cancelSupersededReviewJobs({
-          repositoryId: job.repositoryId,
-          changeRequestId:
-            job.changeRequestId ?? `${job.repositoryId}:${payload.pullNumber}`,
-          headSha: context.changeRequest.headSha,
-          createdBefore: job.createdAt,
-        });
-      if (supersededCount > 0) {
+      const superseded = await this.#queueScheduler.cancelSupersededReviewJobs({
+        repositoryId: job.repositoryId,
+        changeRequestId:
+          job.changeRequestId ?? `${job.repositoryId}:${payload.pullNumber}`,
+        headSha: context.changeRequest.headSha,
+        createdBefore: job.createdAt,
+      });
+      if (superseded.canceledCount > 0) {
         logger.info("Superseded queued review jobs for newer head SHA.", {
           jobId: job.id,
           repositoryId: job.repositoryId,
           changeRequestId:
             job.changeRequestId ?? `${job.repositoryId}:${payload.pullNumber}`,
-          supersededCount,
+          supersededCount: superseded.canceledCount,
         });
+      }
+      // Their queued checks would otherwise sit at "queued" forever; so
+      // would this job's own, if a newer push moved the PR head meanwhile.
+      const staleCheckRunIds = [
+        ...superseded.checkRunIds,
+        ...(payload.checkRunId &&
+        payload.headSha !== null &&
+        payload.headSha !== context.changeRequest.headSha
+          ? [payload.checkRunId]
+          : []),
+      ];
+      for (const staleCheckRunId of staleCheckRunIds) {
+        try {
+          await this.#statusPublisher.markSuperseded?.({
+            installationId: payload.installationId,
+            repository: payload.repository,
+            checkRunId: staleCheckRunId,
+          });
+        } catch (error) {
+          logger.warn("Failed to mark a superseded review check.", {
+            jobId: job.id,
+            checkRunId: staleCheckRunId,
+            error: toErrorMessage(error),
+          });
+        }
+      }
+      const queuedCheckRunId =
+        payload.checkRunId && !staleCheckRunIds.includes(payload.checkRunId)
+          ? payload.checkRunId
+          : null;
+      if (queuedCheckRunId) {
+        // A failure before the repo config loads must still close the
+        // queued check instead of leaving it "queued" forever.
+        checkRunId = queuedCheckRunId;
+        statusChecksEnabled = true;
       }
 
       let instructionBundle: InstructionBundle;
@@ -1243,6 +1286,24 @@ export class WorkerRunner {
         throw classifyReviewError("github", error);
       }
       statusChecksEnabled = instructionBundle.config.statusChecks.enabled;
+      if (!statusChecksEnabled && checkRunId) {
+        try {
+          await this.#statusPublisher.markSkipped({
+            installationId: payload.installationId,
+            repository: payload.repository,
+            sha: context.changeRequest.headSha,
+            reviewRunId: `queued:${job.id}`,
+            checkRunId,
+            description: "Status checks are turned off for this repository.",
+          });
+        } catch (error) {
+          logger.warn("Failed to close the queued review check.", {
+            jobId: job.id,
+            error: toErrorMessage(error),
+          });
+        }
+        checkRunId = null;
+      }
       const reviewPlan = this.#reviewPlanner.plan({
         mode: payload.mode,
         config: instructionBundle.config,
@@ -1306,6 +1367,7 @@ export class WorkerRunner {
               sha: context.changeRequest.headSha,
               reviewRunId: startedReviewRunId,
               description: "nitpickr review is running.",
+              ...(queuedCheckRunId ? { checkRunId: queuedCheckRunId } : {}),
             }),
         );
         if (pendingCheckRunId) {

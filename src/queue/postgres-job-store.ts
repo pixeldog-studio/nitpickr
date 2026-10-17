@@ -299,8 +299,11 @@ export class PostgresJobStore implements JobStore {
     headSha: string;
     /** Only jobs queued before the running one; newer pushes keep theirs. */
     createdBefore: Date;
-  }): Promise<number> {
-    const rows = await this.#client.unsafe<{ canceled_count: number }>(
+  }): Promise<{ canceledCount: number; checkRunIds: string[] }> {
+    const rows = await this.#client.unsafe<{
+      canceled_count: number;
+      check_run_ids: string[] | null;
+    }>(
       `
         with canceled as (
           update jobs
@@ -313,9 +316,10 @@ export class PostgresJobStore implements JobStore {
             and payload->>'headSha' is not null
             and payload->>'headSha' <> $3
             and created_at < $4
-          returning id
+          returning id, payload->>'checkRunId' as check_run_id
         )
-        select count(*)::int as canceled_count
+        select count(*)::int as canceled_count,
+               array_remove(array_agg(check_run_id), null) as check_run_ids
         from canceled
       `,
       [
@@ -326,7 +330,22 @@ export class PostgresJobStore implements JobStore {
       ],
     );
 
-    return rows[0]?.canceled_count ?? 0;
+    return {
+      canceledCount: rows[0]?.canceled_count ?? 0,
+      checkRunIds: rows[0]?.check_run_ids ?? [],
+    };
+  }
+
+  /** Record the queued check run so the worker updates it instead. */
+  async setJobCheckRun(jobId: string, checkRunId: string): Promise<void> {
+    await this.#client.unsafe(
+      `
+        update jobs
+        set payload = payload || jsonb_build_object('checkRunId', $2::text)
+        where id = $1
+      `,
+      [jobId, checkRunId],
+    );
   }
 
   async requeueStaleRunningJobs(input: {

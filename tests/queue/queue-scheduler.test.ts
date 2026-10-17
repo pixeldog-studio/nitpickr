@@ -99,7 +99,7 @@ class InMemoryJobStore implements JobStore {
     repositoryId: string;
     changeRequestId: string;
     headSha: string;
-  }): Promise<number> {
+  }): Promise<{ canceledCount: number; checkRunIds: string[] }> {
     let canceled = 0;
 
     for (const [jobId, job] of this.jobs.entries()) {
@@ -119,8 +119,10 @@ class InMemoryJobStore implements JobStore {
       }
     }
 
-    return canceled;
+    return { canceledCount: canceled, checkRunIds: [] };
   }
+
+  async setJobCheckRun(): Promise<void> {}
 
   async requeueStaleRunningJobs(input: {
     activeWorkerIds: string[];
@@ -307,7 +309,7 @@ describe("QueueScheduler", () => {
       createdBefore: new Date("2026-03-09T10:00:00.000Z"),
     });
 
-    expect(canceled).toBe(1);
+    expect(canceled.canceledCount).toBe(1);
     expect(store.jobs.get("queued_old")?.status).toBe("canceled");
     expect(store.jobs.get("queued_current")?.status).toBe("queued");
   });

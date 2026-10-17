@@ -55,7 +55,7 @@ class FakeQueueScheduler {
   }
 
   async cancelSupersededReviewJobs() {
-    return 0;
+    return { canceledCount: 0, checkRunIds: [] };
   }
 
   async completeJob(jobId: string): Promise<QueueJob> {
@@ -448,6 +448,343 @@ describe("WorkerRunner", () => {
 
     // The opened review is not skipped: it reviews the current head.
     expect(queue.failed[0]?.error).toContain("reached instruction loading");
+  });
+
+  it("moves the queued check to in progress when it reviews that commit", async () => {
+    const queue = new FakeQueueScheduler();
+    const lifecycle = new FakeReviewLifecycleService();
+    const planner = new FakeReviewPlanner();
+    const logger = new FakeLogger();
+    const statusCalls: Array<Record<string, unknown>> = [];
+    const publishCalls: Array<Record<string, unknown>> = [];
+    queue.nextJobs = [
+      {
+        id: "job_1",
+        type: "review_requested",
+        tenantId: "github-installation:123456",
+        repositoryId: "github:99",
+        changeRequestId: "github:99:42",
+        dedupeKey: "github:99:42:quick",
+        priority: 100,
+        status: "running",
+        attempts: 0,
+        maxAttempts: 3,
+        payload: {
+          installationId: "123456",
+          repository: {
+            owner: "rubenspessoa",
+            name: "nitpickr",
+          },
+          pullNumber: 42,
+          mode: "quick",
+          headSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          checkRunId: "queued-check-7",
+          trigger: {
+            type: "manual_command",
+            command: "review",
+            actorLogin: "ruben",
+          },
+        },
+        createdAt: new Date("2026-03-09T10:00:00.000Z"),
+        scheduledAt: new Date("2026-03-09T10:00:00.000Z"),
+        startedAt: new Date("2026-03-09T10:00:01.000Z"),
+        completedAt: null,
+        workerId: "worker_1",
+        lastError: null,
+      },
+    ];
+
+    const runner = new WorkerRunner({
+      logger,
+      queueScheduler: queue,
+      githubAdapter: {
+        async fetchChangeRequestContext() {
+          return {
+            tenantId: "github-installation:123456",
+            installationId: "123456",
+            repositoryId: "github:99",
+            repository: {
+              owner: "rubenspessoa",
+              name: "nitpickr",
+            },
+            changeRequest: {
+              id: "github:99:42",
+              tenantId: "github-installation:123456",
+              installationId: "123456",
+              repositoryId: "github:99",
+              provider: "github" as const,
+              number: 42,
+              title: "Improve queue fairness",
+              baseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              headSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              status: "open" as const,
+              authorLogin: "ruben",
+            },
+            files: [
+              {
+                path: "src/queue/queue-scheduler.ts",
+                additions: 10,
+                deletions: 2,
+                status: "modified" as const,
+                patch: "@@ -1 +1 @@\n+stable ordering",
+                previousPath: null,
+              },
+            ],
+            comments: [],
+          };
+        },
+      },
+      instructionBundleLoader: {
+        async loadForReview() {
+          return {
+            config: {
+              ...testRepositoryConfig,
+              review: {
+                ...testRepositoryConfig.review,
+                maxComments: 5,
+                maxAutoComments: 5,
+                focusAreas: ["queue fairness"],
+              },
+            },
+            documents: [],
+            combinedText: "strictness: balanced",
+          };
+        },
+      },
+      memoryService: {
+        async getRelevantMemories() {
+          return [];
+        },
+        async ingestDiscussion() {
+          return { acknowledgments: [], savedEntries: [] };
+        },
+      },
+      reviewPlanner: planner,
+      reviewLifecycle: lifecycle,
+      reviewEngine: {
+        async review() {
+          return {
+            summary: "Queue fairness improved.",
+            mermaid: "flowchart TD\nA[Queue] --> B[Publish]",
+            findings: [],
+          };
+        },
+      },
+      publisher: {
+        buildInlineComments(findings) {
+          publishCalls.push({
+            type: "build_inline_comments",
+            findings,
+          });
+          return [];
+        },
+        async publish(input) {
+          publishCalls.push({
+            type: "publish",
+            ...input,
+          });
+          return { reviewId: "review_1" };
+        },
+      },
+      statusPublisher: {
+        async markPending(input) {
+          statusCalls.push({
+            type: "pending",
+            ...input,
+          });
+          return "check-run-1";
+        },
+        async markPublished(input) {
+          statusCalls.push({
+            type: "published",
+            ...input,
+          });
+        },
+        async markSkipped() {},
+        async markSuperseded(input) {
+          statusCalls.push({ type: "superseded", ...input });
+        },
+        async markFailed() {
+          return undefined;
+        },
+      },
+    });
+
+    await runner.runOnce({ workerId: "worker_1", perTenantCap: 1 });
+    expect(statusCalls[0]).toMatchObject({
+      type: "pending",
+      checkRunId: "queued-check-7",
+    });
+    expect(statusCalls.some((call) => call.type === "superseded")).toBe(false);
+  });
+
+  it("closes the queued check as superseded when the PR head moved", async () => {
+    const queue = new FakeQueueScheduler();
+    const lifecycle = new FakeReviewLifecycleService();
+    const planner = new FakeReviewPlanner();
+    const logger = new FakeLogger();
+    const statusCalls: Array<Record<string, unknown>> = [];
+    const publishCalls: Array<Record<string, unknown>> = [];
+    queue.nextJobs = [
+      {
+        id: "job_1",
+        type: "review_requested",
+        tenantId: "github-installation:123456",
+        repositoryId: "github:99",
+        changeRequestId: "github:99:42",
+        dedupeKey: "github:99:42:quick",
+        priority: 100,
+        status: "running",
+        attempts: 0,
+        maxAttempts: 3,
+        payload: {
+          installationId: "123456",
+          repository: {
+            owner: "rubenspessoa",
+            name: "nitpickr",
+          },
+          pullNumber: 42,
+          mode: "quick",
+          headSha: "cccccccccccccccccccccccccccccccccccccccc",
+          checkRunId: "queued-check-7",
+          trigger: {
+            type: "manual_command",
+            command: "review",
+            actorLogin: "ruben",
+          },
+        },
+        createdAt: new Date("2026-03-09T10:00:00.000Z"),
+        scheduledAt: new Date("2026-03-09T10:00:00.000Z"),
+        startedAt: new Date("2026-03-09T10:00:01.000Z"),
+        completedAt: null,
+        workerId: "worker_1",
+        lastError: null,
+      },
+    ];
+
+    const runner = new WorkerRunner({
+      logger,
+      queueScheduler: queue,
+      githubAdapter: {
+        async fetchChangeRequestContext() {
+          return {
+            tenantId: "github-installation:123456",
+            installationId: "123456",
+            repositoryId: "github:99",
+            repository: {
+              owner: "rubenspessoa",
+              name: "nitpickr",
+            },
+            changeRequest: {
+              id: "github:99:42",
+              tenantId: "github-installation:123456",
+              installationId: "123456",
+              repositoryId: "github:99",
+              provider: "github" as const,
+              number: 42,
+              title: "Improve queue fairness",
+              baseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              headSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              status: "open" as const,
+              authorLogin: "ruben",
+            },
+            files: [
+              {
+                path: "src/queue/queue-scheduler.ts",
+                additions: 10,
+                deletions: 2,
+                status: "modified" as const,
+                patch: "@@ -1 +1 @@\n+stable ordering",
+                previousPath: null,
+              },
+            ],
+            comments: [],
+          };
+        },
+      },
+      instructionBundleLoader: {
+        async loadForReview() {
+          return {
+            config: {
+              ...testRepositoryConfig,
+              review: {
+                ...testRepositoryConfig.review,
+                maxComments: 5,
+                maxAutoComments: 5,
+                focusAreas: ["queue fairness"],
+              },
+            },
+            documents: [],
+            combinedText: "strictness: balanced",
+          };
+        },
+      },
+      memoryService: {
+        async getRelevantMemories() {
+          return [];
+        },
+        async ingestDiscussion() {
+          return { acknowledgments: [], savedEntries: [] };
+        },
+      },
+      reviewPlanner: planner,
+      reviewLifecycle: lifecycle,
+      reviewEngine: {
+        async review() {
+          return {
+            summary: "Queue fairness improved.",
+            mermaid: "flowchart TD\nA[Queue] --> B[Publish]",
+            findings: [],
+          };
+        },
+      },
+      publisher: {
+        buildInlineComments(findings) {
+          publishCalls.push({
+            type: "build_inline_comments",
+            findings,
+          });
+          return [];
+        },
+        async publish(input) {
+          publishCalls.push({
+            type: "publish",
+            ...input,
+          });
+          return { reviewId: "review_1" };
+        },
+      },
+      statusPublisher: {
+        async markPending(input) {
+          statusCalls.push({
+            type: "pending",
+            ...input,
+          });
+          return "check-run-1";
+        },
+        async markPublished(input) {
+          statusCalls.push({
+            type: "published",
+            ...input,
+          });
+        },
+        async markSkipped() {},
+        async markSuperseded(input) {
+          statusCalls.push({ type: "superseded", ...input });
+        },
+        async markFailed() {
+          return undefined;
+        },
+      },
+    });
+
+    await runner.runOnce({ workerId: "worker_1", perTenantCap: 1 });
+    expect(statusCalls[0]).toMatchObject({
+      type: "superseded",
+      checkRunId: "queued-check-7",
+    });
+    expect(statusCalls[1]).toMatchObject({ type: "pending" });
+    expect(statusCalls[1]).not.toHaveProperty("checkRunId");
   });
 
   it("processes review jobs end to end", async () => {
