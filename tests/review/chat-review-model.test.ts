@@ -343,3 +343,63 @@ describe("ChatCompletionClient text mode", () => {
     expect(body.max_tokens).toBe(800);
   });
 });
+
+describe("model stall watch", () => {
+  const hangUntilAborted = (init?: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () =>
+        reject(new Error("aborted")),
+      );
+    });
+
+  it("gives up when Ollama stops serving the model", async () => {
+    const { ChatCompletionClient } = await import(
+      "../../src/shared/chat-completion-client.js"
+    );
+    const client = new ChatCompletionClient(
+      {
+        model: "qwen3.8:27b-nvfp4",
+        baseUrl: "http://ollama:11434/v1",
+        stallWatch: { intervalMs: 5, maxMissing: 2 },
+      },
+      async (input, init) =>
+        String(input).endsWith("/api/ps")
+          ? new Response(
+              JSON.stringify({ models: [{ name: "qwen3-embedding:0.6b" }] }),
+            )
+          : hangUntilAborted(init),
+    );
+    await expect(
+      client.complete({ messages: [{ role: "user", content: "hi" }] }),
+    ).rejects.toThrow(/stopped serving qwen3.8/);
+  });
+
+  it("turns itself off on servers without /api/ps", async () => {
+    const { ChatCompletionClient } = await import(
+      "../../src/shared/chat-completion-client.js"
+    );
+    let probes = 0;
+    const client = new ChatCompletionClient(
+      {
+        model: "m",
+        baseUrl: "http://server/v1",
+        stallWatch: { intervalMs: 5, maxMissing: 1 },
+      },
+      async (input) => {
+        if (String(input).endsWith("/api/ps")) {
+          probes += 1;
+          return new Response("not found", { status: 404 });
+        }
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        return new Response(
+          JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+        );
+      },
+    );
+    const result = await client.complete({
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(result.content).toBe("ok");
+    expect(probes).toBe(1);
+  });
+});
