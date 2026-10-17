@@ -28,6 +28,7 @@ import { ReviewStatusPublisher } from "../publisher/review-status-publisher.js";
 import { PostgresJobStore } from "../queue/postgres-job-store.js";
 import { QueueScheduler } from "../queue/queue-scheduler.js";
 import { ChatReviewModel } from "../review/chat-review-model.js";
+import { ConversationResponder } from "../review/conversation-responder.js";
 import { PostgresReviewLifecycleStore } from "../review/postgres-review-lifecycle-store.js";
 import { ReviewEngine } from "../review/review-engine.js";
 import { ReviewLifecycleService } from "../review/review-lifecycle-service.js";
@@ -35,12 +36,14 @@ import { ReviewPlanner } from "../review/review-planner.js";
 import { PostgresRuntimeConfigStore } from "../setup/postgres-runtime-config-store.js";
 import { RuntimeConfigService } from "../setup/runtime-config-service.js";
 import { SecretCrypto } from "../setup/secret-crypto.js";
+import { ChatCompletionClient } from "../shared/chat-completion-client.js";
 import { createPostgresClient } from "./postgres.js";
 
 interface OperationalRuntime {
   config: AppConfig;
   githubAdapter: GitHubAdapter;
   reviewEngine: ReviewEngine;
+  conversationResponder: ConversationResponder;
   publisher: ReviewPublisher;
   reviewStatusPublisher: ReviewStatusPublisher;
   instructionBundleLoader: GitHubInstructionBundleLoader;
@@ -166,18 +169,23 @@ export function buildRuntime(
       timeoutMs: models.requestTimeoutMs,
       logger,
     };
-    const reviewEngine = new ReviewEngine(
-      new ChatReviewModel({ ...modelServer, model: reviewModel }),
-      {
-        maxConcurrentModelRequests: models.maxConcurrentRequests,
-        maxTotalCharactersPerChunk: models.reviewChunkMaxTotalChars,
-        inlinePolicy: models.inlinePolicy,
-        verifier:
-          models.verifierMaxFindings === null
-            ? null
-            : { maxFindings: models.verifierMaxFindings },
-      },
+    const reviewChatModel = new ChatReviewModel({
+      ...modelServer,
+      model: reviewModel,
+    });
+    const conversationResponder = new ConversationResponder(
+      new ChatCompletionClient({ ...modelServer, model: reviewModel }),
+      reviewChatModel,
     );
+    const reviewEngine = new ReviewEngine(reviewChatModel, {
+      maxConcurrentModelRequests: models.maxConcurrentRequests,
+      maxTotalCharactersPerChunk: models.reviewChunkMaxTotalChars,
+      inlinePolicy: models.inlinePolicy,
+      verifier:
+        models.verifierMaxFindings === null
+          ? null
+          : { maxFindings: models.verifierMaxFindings },
+    });
     const memoryClassifier = new ChatMemoryClassifier({
       ...modelServer,
       model: memoryModel,
@@ -199,39 +207,42 @@ export function buildRuntime(
         }),
       });
     }
-    const publisher = new ReviewPublisher({
-      listPullRequestReviews: async ({
-        installationId,
-        repository,
-        pullNumber,
-      }) =>
-        (
-          await githubRestClient.listPullRequestReviews({
+    const publisher = new ReviewPublisher(
+      {
+        listPullRequestReviews: async ({
+          installationId,
+          repository,
+          pullNumber,
+        }) =>
+          (
+            await githubRestClient.listPullRequestReviews({
+              installationId,
+              owner: repository.owner,
+              repo: repository.name,
+              pullNumber,
+            })
+          ).map((review) => ({
+            reviewId: String(review.id),
+            body: review.body ?? "",
+          })),
+        publishPullRequestReview: ({
+          installationId,
+          repository,
+          pullNumber,
+          body,
+          comments,
+        }) =>
+          githubRestClient.publishPullRequestReview({
             installationId,
             owner: repository.owner,
             repo: repository.name,
             pullNumber,
-          })
-        ).map((review) => ({
-          reviewId: String(review.id),
-          body: review.body ?? "",
-        })),
-      publishPullRequestReview: ({
-        installationId,
-        repository,
-        pullNumber,
-        body,
-        comments,
-      }) =>
-        githubRestClient.publishPullRequestReview({
-          installationId,
-          owner: repository.owner,
-          repo: repository.name,
-          pullNumber,
-          body,
-          comments,
-        }),
-    });
+            body,
+            comments,
+          }),
+      },
+      { botLogin: operationalConfig.github.botLogins[0] },
+    );
     const reviewStatusPublisher = new ReviewStatusPublisher({
       createCheckRun: ({
         installationId,
@@ -286,6 +297,7 @@ export function buildRuntime(
         config: operationalConfig,
         githubAdapter,
         reviewEngine,
+        conversationResponder,
         publisher,
         reviewStatusPublisher,
         instructionBundleLoader,

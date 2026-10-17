@@ -18,10 +18,17 @@ Baseline commit: `e7aecec`. One PR per milestone; never merge; nitpickr reviews 
 - [x] Pipeline-level live eval (gate, floor, budget, multi-round, verdicts)
 - [x] 47 cases: 22 synthetic (Swift, TS, SQL, Python planted/clean, injection, multi-round) + 25 captured from ai-automation, user-management, ai-plant-scanner(-web), rouleur-ios, nitpickr
 - [x] Metrics: precision (medium+), recall, nit count, clean-case FPs, verdict accuracy, median latency, per stack/kind
-- [ ] Baseline on `e7aecec` (full suite) and comparison on branch
+- [x] Baseline on `e7aecec` (full suite): precision(medium+) 34%, recall 53%, 59 nits, 35 clean-case findings, median 16.7 s
 - Gap: no captured real SQL/RLS bug within the size limit; SQL coverage is synthetic only
 
 ## Milestone 3 — verifier + lenses + lint filter + untrusted content
+- [x] Adversarial verifier (fresh context, full file, related code, quotes checked, decision-first); uncertain/refuted demoted, not deleted
+- [x] Evidence gate, collapse of nearby findings, untrusted-content hardening
+- [x] Confirmed-only inline comments, the rest in a "Second look" list (owner chose option C)
+- [x] 6k output-token cap: model repetition loops had caused 30-minute hangs
+- [x] Model: qwen3.8 27b for review and verification (owner's choice; criteria 2 and 4 accepted at 83% inline precision, 3.2x median)
+- [x] Independent review: 7 issues fixed (budget counted second-look items, failed checks went inline, truncation failed the whole review, floor skipped demotions, end state ignored second look, unescaped prose, comment-only refutations)
+- [x] Merged as #16 (e890360); separate fix #17 for jobs orphaned by worker restarts (d7b94c7)
 ## Milestone 4 — conversation
 ## Milestone 5 — learning
 ## Milestone 6 — voice
@@ -34,6 +41,7 @@ Baseline commit: `e7aecec`. One PR per milestone; never merge; nitpickr reviews 
 | #14 r1 (old build) | 9 | 0 | 5 | 4 (all ⚠️ medium) | 0 known | wrong ones misread code (one inverted a filter); trimmer cut a body at `'a'.`; 3-paragraph summary from chunk joins |
 | #14 r2 (old build) | 1 | 0 | 1 | 0 | — | refactor nit |
 | #14 r3 (old build) | 1 | 0 | 1 | 1 (suggestion inapplicable) | 4 (found by independent review) | body cut at `expect(.` again |
+| #16 r1 (old build, qwen3.6) | 8 | 0 | 5 | 3 (misread the code: resume skip, regex, a `splice` that does not exist) | 7 (found by independent review) | 15 h queue stall delayed it; summary stacked 4 chunk paragraphs |
 
 # Website Metadata + SEO Refresh
 

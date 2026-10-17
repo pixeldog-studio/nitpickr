@@ -7,7 +7,10 @@ export type ReviewerChatCommand =
   | "reconsider"
   | "fix"
   | "learn"
-  | "status";
+  | "status"
+  | "help"
+  /** Free-form question or reply; answered by the model. */
+  | "ask";
 
 export interface ReviewerChatThreadContext {
   providerCommentId: string;
@@ -27,6 +30,19 @@ export interface ReviewerChatReply {
     body: string;
     path: string | null;
   }>;
+}
+
+/**
+ * How to talk to nitpickr. Shown by `@nitpickr help` and in the first review
+ * summary so the commands are discoverable without reading docs.
+ */
+export function renderCommandTips(botLogin = "nitpickr"): string {
+  return [
+    `- Reply to any of my comments, or mention \`@${botLogin}\` with a question about this PR.`,
+    `- In a comment thread: \`why\` (impact), \`teach\` (principle), \`fix\` (prompt for your coding agent), \`reconsider\` (I re-check it against the code).`,
+    `- \`@${botLogin} learn <preference>\` teaches me something about this repo.`,
+    `- \`@${botLogin} review\` re-runs a review, \`full review\` reviews the whole PR, \`summary\` summarizes, \`status\` shows where things stand.`,
+  ].join("\n");
 }
 
 function shortSha(sha: string | null | undefined): string | null {
@@ -94,6 +110,12 @@ function categoryFromFingerprint(
 }
 
 export class ReviewerChatService {
+  readonly #botLogin: string;
+
+  constructor(options: { botLogin?: string } = {}) {
+    this.#botLogin = options.botLogin ?? "nitpickr";
+  }
+
   async respond(input: {
     command: ReviewerChatCommand;
     actorLogin: string;
@@ -108,6 +130,22 @@ export class ReviewerChatService {
     thread?: ReviewerChatThreadContext | null;
   }): Promise<ReviewerChatReply> {
     switch (input.command) {
+      case "help":
+        return {
+          body: renderCommandTips(this.#botLogin),
+          feedbackEvents: [],
+          memoryDiscussions: [],
+        };
+      case "ask":
+        // Model-backed in the worker; this is the fallback when no model
+        // responder is configured.
+        return {
+          body:
+            "I can't answer free-form questions right now. These commands work:\n\n" +
+            renderCommandTips(this.#botLogin),
+          feedbackEvents: [],
+          memoryDiscussions: [],
+        };
       case "status":
         return {
           body: this.#buildStatusReply(input.latestReview ?? null),

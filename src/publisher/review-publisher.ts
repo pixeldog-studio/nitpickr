@@ -1,4 +1,5 @@
 import { fingerprintFinding } from "../review/finding-fingerprint.js";
+import { renderCommandTips } from "../review/reviewer-chat-service.js";
 import {
   DIAGNOSTIC_ELLIPSIS_TRUNCATION_MARKER,
   DIAGNOSTIC_MAX_SERIALIZED_LENGTH,
@@ -531,9 +532,15 @@ function shortSha(sha: string | undefined): string | null {
 
 export class ReviewPublisher {
   readonly #client: PublishReviewClient;
+  readonly #botLogin: string;
 
-  constructor(client: PublishReviewClient) {
+  /** `botLogin` is the handle shown in the "talk to nitpickr" tips. */
+  constructor(
+    client: PublishReviewClient,
+    options: { botLogin?: string } = {},
+  ) {
     this.#client = client;
+    this.#botLogin = options.botLogin ?? "nitpickr";
   }
 
   buildSummaryBody(input: {
@@ -573,6 +580,13 @@ export class ReviewPublisher {
       "```mermaid",
       input.mermaid.trim(),
       "```",
+      "",
+      "</details>",
+      "",
+      "<details>",
+      "<summary>💬 Talk to nitpickr</summary>",
+      "",
+      renderCommandTips(this.#botLogin),
       "",
       "</details>",
     ].join("\n");

@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import {
+  classifyInteraction,
   GitHubAdapter,
   type GitHubApiClient,
 } from "../../src/providers/github/github-adapter.js";
@@ -365,6 +366,7 @@ describe("GitHubAdapter", () => {
           login: "maintainer",
         },
       },
+      changes: { body: { from: "looks good" } },
     });
 
     expect(event.kind).toBe("review_requested");
@@ -379,6 +381,42 @@ describe("GitHubAdapter", () => {
 
     expect(event.trigger.command).toBe("review");
     expect(event.mode).toBe("quick");
+  });
+
+  it("ignores an edit to a comment that already had the command", () => {
+    const adapter = new GitHubAdapter({
+      apiClient: new FakeGitHubApiClient(),
+      appConfig: {
+        appId: 123456,
+        privateKey: "test",
+        webhookSecret: "super-secret",
+        webhookUrl: "https://nitpickr.example.com/webhooks/github",
+        botLogins: ["nitpickr", "getnitpickr"],
+      },
+    });
+    const event = adapter.normalizeWebhookEvent("issue_comment", {
+      action: "edited",
+      installation: { id: 123456 },
+      repository: {
+        id: 99,
+        name: "nitpickr",
+        owner: { login: "rubenspessoa" },
+        default_branch: "main",
+      },
+      issue: {
+        number: 42,
+        pull_request: {
+          url: "https://api.github.com/repos/rubenspessoa/nitpickr/pulls/42",
+        },
+      },
+      comment: {
+        id: 5002,
+        body: "@nitpickr review please",
+        user: { login: "maintainer" },
+      },
+      changes: { body: { from: "@nitpickr review plz" } },
+    });
+    expect(event.kind).toBe("ignored");
   });
 
   it("accepts flexible manual command formatting", () => {
@@ -530,7 +568,7 @@ describe("GitHubAdapter", () => {
         pullNumber: 42,
         command: "learn",
         source: expect.objectContaining({
-          argumentText: "prefer explicit guards in api handlers",
+          argumentText: "prefer explicit guards in API handlers",
         }),
       }),
     );
@@ -630,16 +668,16 @@ describe("GitHubAdapter", () => {
       expect.objectContaining({
         kind: "interaction_requested",
         pullNumber: 42,
-        command: "fix",
+        command: "ask",
         replyTargetCommentId: 6001,
         source: expect.objectContaining({
-          argumentText: "add an explicit guard before parsing",
+          argumentText: "fix add an explicit guard before parsing",
         }),
       }),
     );
   });
 
-  it("ignores unsupported comment commands", () => {
+  it("turns free-form mentions into questions", () => {
     const adapter = new GitHubAdapter({
       apiClient: new FakeGitHubApiClient(),
       appConfig: {
@@ -681,12 +719,43 @@ describe("GitHubAdapter", () => {
 
     expect(event).toEqual(
       expect.objectContaining({
-        kind: "ignored",
-        reason: expect.stringContaining(
-          "Comment did not contain a recognized nitpickr command.",
-        ),
+        kind: "interaction_requested",
+        command: "ask",
+        source: expect.objectContaining({ argumentText: "ship it" }),
       }),
     );
+  });
+
+  it("ignores comments written by the bot itself", () => {
+    const adapter = new GitHubAdapter({
+      apiClient: new FakeGitHubApiClient(),
+      appConfig: {
+        appId: 1,
+        privateKey: "key",
+        webhookSecret: "secret",
+        webhookUrl: "https://example.com/webhooks/github",
+        botLogins: ["nitpickrai"],
+      },
+    });
+    const event = adapter.normalizeWebhookEvent("pull_request_review_comment", {
+      action: "created",
+      installation: { id: 123456 },
+      repository: {
+        id: 99,
+        name: "nitpickr",
+        owner: { login: "rubenspessoa" },
+        default_branch: "main",
+      },
+      pull_request: { number: 42 },
+      comment: {
+        id: 7001,
+        body: "Fair point. I re-checked it and the finding was wrong.",
+        in_reply_to_id: 7000,
+        user: { login: "nitpickrai[bot]" },
+      },
+    });
+
+    expect(event).toMatchObject({ kind: "ignored" });
   });
 
   it("reacts to issue comments that mention the bot", async () => {
@@ -885,5 +954,59 @@ describe("GitHubAdapter", () => {
       kind: "ignored",
       reason: "Unsupported pull_request payload.",
     });
+  });
+});
+
+describe("classifyInteraction", () => {
+  const bots = ["nitpickrai"];
+  it.each([
+    ["@nitpickrai why", false, "why", null],
+    [
+      "@nitpickrai why does the retry sleep 5s?",
+      false,
+      "ask",
+      "why does the retry sleep 5s?",
+    ],
+    [
+      "@nitpickrai help me understand the queue",
+      false,
+      "ask",
+      "help me understand the queue",
+    ],
+    [
+      "@nitpickrai learn prefer explicit guards in API handlers",
+      false,
+      "learn",
+      "prefer explicit guards in API handlers",
+    ],
+    ["@nitpickrai", false, "help", null],
+    [
+      "In retry.ts:\n@nitpickrai is this safe?",
+      false,
+      "ask",
+      "In retry.ts:\nis this safe?",
+    ],
+    [
+      "Why is this a problem? input is validated upstream",
+      true,
+      "ask",
+      "Why is this a problem? input is validated upstream",
+    ],
+    ["reconsider", true, "reconsider", null],
+  ])("%s", (body, inThread, command, argumentText) => {
+    expect(classifyInteraction(body, bots, { inThread })).toEqual({
+      command,
+      argumentText,
+    });
+  });
+
+  it.each([
+    ["Thanks @nitpickrai!", false],
+    ["> @nitpickrai why\nagreed with the above", false],
+    ["```\n@nitpickrai review\n```", false],
+    ["@alice can you take this?", true],
+    ["thanks, done", true],
+  ])("ignores %s", (body, inThread) => {
+    expect(classifyInteraction(body, bots, { inThread })).toBeNull();
   });
 });
