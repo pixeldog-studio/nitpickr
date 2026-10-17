@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { hostname } from "node:os";
 import { env } from "node:process";
 
 import * as Sentry from "@sentry/node";
@@ -16,7 +18,10 @@ async function main(): Promise<void> {
   const logger = runtime.logger.child({
     component: "worker",
   });
-  const workerId = `worker-${process.pid}`;
+  // Unique per process start. In a container the pid is always 1, so a
+  // pid-based id survives restarts: the new worker's heartbeat then vouches
+  // for the old one and its orphaned running job is never recovered.
+  const workerId = `worker-${hostname()}-${process.pid}-${randomUUID().slice(0, 8)}`;
   let previousSetupStatusSignature: string | null = null;
   let shuttingDown = false;
 
