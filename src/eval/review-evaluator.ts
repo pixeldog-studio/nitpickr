@@ -130,8 +130,11 @@ export class ReviewEvaluator {
     let totalNegativeReactionFeedback = 0;
 
     for (const fixture of fixtures) {
+      // Canned responses predate the evidence field; replay scores ranking,
+      // dedupe and gating, while the evidence gate has its own unit tests.
       const engine = new ReviewEngine(
         new FixtureReviewModel(fixture.chunkResponses),
+        { requireEvidence: false },
       );
       const diagnostics = await engine.reviewWithDiagnostics({
         ...(fixture.input as ReviewEngineInput),

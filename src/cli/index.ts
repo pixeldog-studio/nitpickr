@@ -1,14 +1,23 @@
+import { readFile } from "node:fs/promises";
 import { cwd, env, exit } from "node:process";
 
 import {
   parseBootstrapConfig as parseCliBootstrapConfig,
   type ReasoningEffort,
 } from "../config/app-config.js";
+import {
+  loadLiveEvaluationFixtures,
+  rescoreReport,
+} from "../eval/live-review-evaluator.js";
 import { createPostgresClient } from "../runtime/postgres.js";
 import { flagBoolean, flagInteger, flagString, parseArgs } from "./args.js";
 import { DoctorCommand } from "./doctor-command.js";
 import { EvalCaptureCommand } from "./eval-capture-command.js";
-import { EvalLiveReviewsCommand } from "./eval-live-reviews-command.js";
+import {
+  DEFAULT_LIVE_FIXTURE_DIRECTORY,
+  EvalLiveReviewsCommand,
+  formatTotals,
+} from "./eval-live-reviews-command.js";
 import { EvalReviewsCommand } from "./eval-reviews-command.js";
 import { runMigrationsWithAdvisoryLock } from "./migrate-command.js";
 import { SetupCommand } from "./setup-command.js";
@@ -83,8 +92,14 @@ async function main(): Promise<void> {
         engineOptions: {
           maxConcurrentModelRequests: bootstrap.models.maxConcurrentRequests,
           maxTotalCharactersPerChunk: bootstrap.models.reviewChunkMaxTotalChars,
+          inlinePolicy: bootstrap.models.inlinePolicy,
+          verifier:
+            bootstrap.models.verifierMaxFindings === null
+              ? null
+              : { maxFindings: bootstrap.models.verifierMaxFindings },
         },
         startedAt: new Date().toISOString(),
+        ...(flagBoolean(args, "resume") ? { resume: true } : {}),
         ...(flagString(args, "commit")
           ? { gitCommit: flagString(args, "commit") as string }
           : {}),
@@ -105,6 +120,32 @@ async function main(): Promise<void> {
     await evaluation.run({
       cwd: cwd(),
     });
+    return;
+  }
+
+  if (command === "eval:rescore") {
+    const args = parseArgs(process.argv.slice(3));
+    const reportPath = args.positionals[0];
+    if (!reportPath) {
+      throw new Error(
+        "Usage: nitpickr eval:rescore <report.json> [--fixtures tests/fixtures/review-evals/live]",
+      );
+    }
+    const report = JSON.parse(await readFile(reportPath, "utf8"));
+    const fixtures = await loadLiveEvaluationFixtures(
+      flagString(args, "fixtures") ??
+        `${cwd()}/${DEFAULT_LIVE_FIXTURE_DIRECTORY}`,
+    );
+    const rescored = rescoreReport(report, fixtures);
+    console.log(formatTotals(`Rescored ${reportPath}`, rescored.totals));
+    for (const [group, entries] of [
+      ["stack", rescored.totals.byStack],
+      ["kind", rescored.totals.byKind],
+    ] as const) {
+      for (const [name, entry] of Object.entries(entries)) {
+        console.log(formatTotals(`  ${group}=${name}`, entry));
+      }
+    }
     return;
   }
 

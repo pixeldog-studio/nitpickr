@@ -184,3 +184,20 @@ describe("ReviewPlanner", () => {
     expect(plan.summaryOnlyReason).toMatch(/summary-only/i);
   });
 });
+
+describe("generated files", () => {
+  it("skips lockfiles, snapshots and minified bundles", async () => {
+    const { isGeneratedFile } = await import(
+      "../../src/review/review-planner.js"
+    );
+    expect(isGeneratedFile("pnpm-lock.yaml")).toBe(true);
+    expect(
+      isGeneratedFile(
+        "ios/App.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved",
+      ),
+    ).toBe(true);
+    expect(isGeneratedFile("tests/__snapshots__/a.test.ts.snap")).toBe(true);
+    expect(isGeneratedFile("public/app.min.js")).toBe(true);
+    expect(isGeneratedFile("src/lockfile-parser.ts")).toBe(false);
+  });
+});

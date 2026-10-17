@@ -4,6 +4,7 @@ import {
   type ResponseJsonSchema,
   toResponseSchema,
 } from "../shared/chat-completion-client.js";
+import { TruncatedOutputError } from "../shared/model-output.js";
 import {
   type DiagramSpec,
   defaultDiagramSpec,
@@ -18,6 +19,7 @@ import {
   severityWeight,
 } from "./evidence-gate.js";
 import { fingerprintFinding } from "./finding-fingerprint.js";
+import { downgradeSeverity, verifyFinding } from "./finding-verifier.js";
 import {
   type PriorThread,
   type PriorThreadVerdict,
@@ -29,6 +31,7 @@ import {
   type PromptUsageSnapshot,
   type ReviewScope,
 } from "./prompt-payload-optimizer.js";
+import { findRelatedCode } from "./related-code.js";
 
 const defaultMermaidDiagram = renderDiagramSpec(defaultDiagramSpec);
 const defaultSummary = "nitpickr completed the review.";
@@ -50,6 +53,19 @@ const findingSchema = z.object({
   body: z.string().min(1),
   fixPrompt: z.string().min(1),
   suggestedChange: z.string().min(1).optional(),
+  /** Line(s) the model quoted from the patch as the defect. */
+  evidence: z.string().min(1).optional(),
+  /** Concrete input/state, what happens, what should happen. */
+  failureScenario: z.string().min(1).optional(),
+  /** What the adversarial verifier decided; for logs and eval reports. */
+  verification: z
+    .object({
+      verdict: z.enum(["confirmed", "refuted", "uncertain", "unverified"]),
+      confidence: z.enum(["low", "medium", "high"]).optional(),
+      reason: z.string(),
+      failed: z.literal(true).optional(),
+    })
+    .optional(),
 });
 
 const findingTypeAliasMap: Record<
@@ -71,6 +87,12 @@ const findingTypeAliasMap: Record<
 };
 
 const MAX_SUGGESTED_CHANGE_LINES = 12;
+const MAX_EVIDENCE_CHARACTERS = 1_200;
+/** Unconfirmed findings listed in the summary, on top of the inline budget. */
+const SECOND_LOOK_MAX_FINDINGS = 5;
+/** Sent on the one retry after a chunk's reply was cut off at the cap. */
+const SHORT_REPLY_NUDGE =
+  "Your previous reply ran past the length limit. Report at most 3 findings, keep every field to one or two sentences, and return a minimal diagram.";
 const MAX_SUGGESTED_CHANGE_CHARACTERS = 600;
 
 const severityAliasMap: Record<
@@ -299,6 +321,11 @@ function normalizeFinding(value: unknown): ReviewFinding | null {
       : undefined;
   const suggestedChange =
     findingType === "safe_suggestion" ? normalizedSuggestedChange : undefined;
+  const evidence = normalizeString(candidate.evidence)?.slice(
+    0,
+    MAX_EVIDENCE_CHARACTERS,
+  );
+  const failureScenario = normalizeString(candidate.failureScenario);
 
   const parsed = findingSchema.safeParse({
     path,
@@ -310,6 +337,10 @@ function normalizeFinding(value: unknown): ReviewFinding | null {
     body: conciseBody,
     fixPrompt,
     suggestedChange,
+    ...(evidence === undefined ? {} : { evidence }),
+    ...(failureScenario === undefined
+      ? {}
+      : { failureScenario: maybeTrimSentenceCount(failureScenario, 3) }),
   });
 
   return parsed.success ? parsed.data : null;
@@ -581,6 +612,8 @@ const reviewResponseWireSchema = z.strictObject({
       category: findingSchema.shape.category,
       title: z.string(),
       body: z.string(),
+      evidence: z.string(),
+      failureScenario: z.string(),
       fixPrompt: z.string(),
       suggestedChange: z.string().nullable(),
     }),
@@ -652,6 +685,11 @@ export interface ReviewEngineResult {
   summary: string;
   mermaid: string;
   findings: ReviewFinding[];
+  /**
+   * With the `confirmed` inline policy: findings the verifier did not
+   * confirm, listed in the summary instead of posted as inline comments.
+   */
+  secondLook?: ReviewFinding[];
   /** Verdicts for prior threads that needed one; unknown ids are dropped. */
   priorThreadVerdicts?: Array<{
     threadId: string;
@@ -678,6 +716,24 @@ export interface ReviewEngineOptions {
   maxTotalCharactersPerChunk?: number;
   /** Max model requests in flight for one review; 1 = strictly sequential. */
   maxConcurrentModelRequests?: number;
+  /**
+   * Reject findings whose quoted `evidence` is missing or does not appear in
+   * the patch/file (default true): it catches findings about code that is
+   * not there, the most common false positive from small models.
+   */
+  requireEvidence?: boolean;
+  /**
+   * Adversarially verify findings that survive the gate, one model call each
+   * and at most `maxFindings` per review. Confirmed findings publish, refuted
+   * ones drop, uncertain ones lose one severity level. Off when null/absent.
+   */
+  verifier?: { maxFindings: number } | null;
+  /**
+   * `all` (default): every surviving finding is an inline comment.
+   * `confirmed`: only verifier-confirmed (or unverifiable) findings are
+   * inline; the rest go to a "worth a second look" list in the summary.
+   */
+  inlinePolicy?: "all" | "confirmed";
 }
 
 export const DEFAULT_MAX_PATCH_CHARACTERS_PER_CHUNK = 16_000;
@@ -792,6 +848,30 @@ function dedupeAndRankFindings(findings: ReviewFinding[]): ReviewFinding[] {
   return [...deduped.values()].sort(compareFindings);
 }
 
+/** Lines apart at which two findings on one file describe the same spot. */
+const NEARBY_FINDING_LINES = 3;
+
+/**
+ * One comment per spot: models often flag the same defect twice from
+ * different angles (or from two chunks). Keeps the first (best ranked)
+ * finding on each path within a few lines of each other.
+ */
+export function collapseNearbyFindings<
+  TFinding extends { path: string; line: number },
+>(findings: TFinding[]): { kept: TFinding[]; collapsed: TFinding[] } {
+  const kept: TFinding[] = [];
+  const collapsed: TFinding[] = [];
+  for (const finding of findings) {
+    const duplicate = kept.some(
+      (existing) =>
+        existing.path === finding.path &&
+        Math.abs(existing.line - finding.line) <= NEARBY_FINDING_LINES,
+    );
+    (duplicate ? collapsed : kept).push(finding);
+  }
+  return { kept, collapsed };
+}
+
 function mergeMermaid(diagrams: string[]): string {
   if (diagrams.length === 0) {
     return defaultMermaidDiagram;
@@ -857,6 +937,9 @@ export class ReviewEngine {
   readonly #maxPatchCharactersPerChunk: number;
   readonly #maxTotalCharactersPerChunk: number;
   readonly #maxConcurrentModelRequests: number;
+  readonly #requireEvidence: boolean;
+  readonly #verifier: { maxFindings: number } | null;
+  readonly #inlinePolicy: "all" | "confirmed";
 
   constructor(model: ReviewModel, options: ReviewEngineOptions = {}) {
     this.#model = model;
@@ -871,6 +954,165 @@ export class ReviewEngine {
     this.#maxConcurrentModelRequests =
       options.maxConcurrentModelRequests ??
       DEFAULT_MAX_CONCURRENT_MODEL_REQUESTS;
+    this.#requireEvidence = options.requireEvidence ?? true;
+    this.#verifier = options.verifier ?? null;
+    this.#inlinePolicy = options.inlinePolicy ?? "all";
+  }
+
+  /**
+   * One chunk's review. A reply cut off at the output cap (usually a
+   * repetition loop) is retried once with a request for a shorter answer;
+   * if that is cut off too, the chunk is skipped and the summary says so,
+   * instead of failing the whole review and every other chunk with it.
+   */
+  async #generateChunkReview(
+    prompt: { system: string; user: string },
+    files: Array<{ path: string }>,
+  ): Promise<unknown> {
+    const generate = (user: string) =>
+      this.#model.generateStructuredReview({
+        system: prompt.system,
+        user,
+        jsonSchema: reviewResponseJsonSchema,
+      });
+    try {
+      return await generate(prompt.user);
+    } catch (error) {
+      if (!(error instanceof TruncatedOutputError)) {
+        throw error;
+      }
+    }
+    try {
+      return await generate(`${prompt.user}\n\n${SHORT_REPLY_NUDGE}`);
+    } catch (error) {
+      if (!(error instanceof TruncatedOutputError)) {
+        throw error;
+      }
+      const paths = files.map((file) => `\`${file.path}\``);
+      const shown = paths.slice(0, 3).join(", ");
+      const more = paths.length > 3 ? ` and ${paths.length - 3} more` : "";
+      return {
+        summary: `I couldn't review ${shown}${more}: my reply kept running past its length limit.`,
+        findings: [],
+        priorThreadVerdicts: [],
+      };
+    }
+  }
+
+  /**
+   * Whether a verified finding becomes an inline comment. Under `confirmed`,
+   * only confirmed findings and ones the cap skipped go inline; a check that
+   * failed (timeout, cut-off reply) must not open the gate, or an unhealthy
+   * model or a reply-looping input would post everything unchecked.
+   */
+  #isInline(finding: ReviewFinding): boolean {
+    const verification = finding.verification;
+    if (this.#inlinePolicy === "all" || verification === undefined) {
+      return true;
+    }
+    return (
+      verification.verdict === "confirmed" ||
+      (verification.verdict === "unverified" && verification.failed !== true)
+    );
+  }
+
+  /**
+   * Verify gated findings in rank order until the inline comments fill the
+   * comment budget. Only inline findings count against it, so unconfirmed
+   * ones listed for a second look never crowd out a confirmed finding
+   * ranked below them.
+   */
+  async #verify(
+    findings: ReviewFinding[],
+    input: ReviewEngineInput,
+  ): Promise<{
+    inline: ReviewFinding[];
+    secondLook: ReviewFinding[];
+    rejected: EvidenceGateRejectedFinding<ReviewFinding>[];
+  }> {
+    const verifier = this.#verifier;
+    if (verifier === null) {
+      return {
+        inline: findings.slice(0, input.commentBudget),
+        secondLook: [],
+        rejected: [],
+      };
+    }
+    const inline: ReviewFinding[] = [];
+    const secondLook: ReviewFinding[] = [];
+    const keep = (finding: ReviewFinding) => {
+      if (this.#isInline(finding)) {
+        inline.push(finding);
+      } else if (secondLook.length < SECOND_LOOK_MAX_FINDINGS) {
+        secondLook.push(finding);
+      }
+    };
+    const filesByPath = new Map(input.files.map((file) => [file.path, file]));
+    const floor = input.severityFloor ?? null;
+    const rejected: EvidenceGateRejectedFinding<ReviewFinding>[] = [];
+    const belowFloor = (severity: ReviewFinding["severity"]) =>
+      floor !== null && severityWeight(severity) < severityWeight(floor);
+    let calls = 0;
+    for (const finding of findings) {
+      if (inline.length >= input.commentBudget) {
+        break;
+      }
+      const file = filesByPath.get(finding.path);
+      const outcome =
+        file !== undefined && calls < verifier.maxFindings
+          ? await verifyFinding(
+              this.#model,
+              finding,
+              file,
+              findRelatedCode({ finding, files: input.files }),
+            )
+          : { verdict: "unverified" as const, reason: "not verified (cap)" };
+      calls += file === undefined ? 0 : 1;
+      if (outcome.verdict === "confirmed" || outcome.verdict === "unverified") {
+        // Unverified (cap reached or the verifier failed) is not evidence
+        // against the finding: keep it as the reviewer rated it.
+        keep({ ...finding, verification: outcome });
+        continue;
+      }
+      if (
+        outcome.verdict === "refuted" &&
+        (finding.severity === "high" || finding.severity === "critical") &&
+        !belowFloor(downgradeSeverity(finding.severity))
+      ) {
+        // A small model can talk itself out of a real serious bug; demote
+        // instead of deleting so it still gets seen.
+        keep({
+          ...finding,
+          severity: downgradeSeverity(finding.severity),
+          verification: outcome,
+        });
+        continue;
+      }
+      if (outcome.verdict === "refuted") {
+        rejected.push({
+          finding,
+          findingFingerprint: fingerprintFinding(finding),
+          reasons: ["refuted_by_verifier"],
+          detail: outcome.reason,
+        });
+        continue;
+      }
+      const downgraded = {
+        ...finding,
+        severity: downgradeSeverity(finding.severity),
+      };
+      if (belowFloor(downgraded.severity)) {
+        rejected.push({
+          finding,
+          findingFingerprint: fingerprintFinding(finding),
+          reasons: ["unconfirmed_below_floor"],
+          detail: outcome.reason,
+        });
+        continue;
+      }
+      keep({ ...downgraded, verification: outcome });
+    }
+    return { inline, secondLook, rejected };
   }
 
   async #reviewInternal(input: ReviewEngineInput): Promise<{
@@ -961,10 +1203,7 @@ export class ReviewEngine {
             : {}),
         });
 
-        const response = await this.#model.generateStructuredReview({
-          ...prompt,
-          jsonSchema: reviewResponseJsonSchema,
-        });
+        const response = await this.#generateChunkReview(prompt, files);
         const parsed = modelResponseSchema.parse(response);
         // A chunk may only judge threads it was shown.
         const shownThreadIds = new Set(
@@ -1049,6 +1288,7 @@ export class ReviewEngine {
     const gatedFindings = gateAndRankFindings({
       findings: reviewed.result.findings,
       files: input.files,
+      requireEvidence: this.#requireEvidence,
       ...(openThreads.length === 0 ? {} : { openThreads }),
       ...(input.severityFloor === undefined
         ? {}
@@ -1061,12 +1301,26 @@ export class ReviewEngine {
         : { publishableFindingTypes: input.publishableFindingTypes }),
     });
 
+    const nearby = collapseNearbyFindings(gatedFindings.acceptedFindings);
+    const verified = await this.#verify(nearby.kept, input);
+
     return {
       result: {
         ...reviewed.result,
-        findings: gatedFindings.acceptedFindings.slice(0, input.commentBudget),
+        findings: verified.inline,
+        ...(this.#inlinePolicy === "confirmed" && this.#verifier !== null
+          ? { secondLook: verified.secondLook }
+          : {}),
       },
-      rejectedFindings: gatedFindings.rejectedFindings,
+      rejectedFindings: [
+        ...gatedFindings.rejectedFindings,
+        ...nearby.collapsed.map((finding) => ({
+          finding,
+          findingFingerprint: fingerprintFinding(finding),
+          reasons: ["duplicates_nearby_finding" as const],
+        })),
+        ...verified.rejected,
+      ],
       promptUsage: reviewed.promptUsage,
     };
   }

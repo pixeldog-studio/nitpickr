@@ -137,6 +137,11 @@ export interface LiveCaseReport {
   nitCount: number;
   verdictsExpected: number;
   verdictsCorrect: number;
+  /** Expectations matched by inline or second-look findings. */
+  matchedIncludingSecondLook?: number;
+  secondLook?: Array<
+    Pick<ReviewFinding, "path" | "line" | "severity" | "category" | "title">
+  >;
   durationMs: number;
   modelCalls: number;
   promptTokens: number | null;
@@ -159,6 +164,7 @@ export interface LiveCaseReport {
       | "findingType"
       | "title"
       | "body"
+      | "verification"
     >
   >;
   error: string | null;
@@ -175,6 +181,8 @@ export interface LiveEvaluationTotals {
   recall: number;
   /** Precision over medium+ findings only (the goal's headline number). */
   precisionMediumPlus: number;
+  /** Recall when the summary's "worth a second look" list counts too. */
+  recallIncludingSecondLook: number;
   nitCount: number;
   /** Findings published on cases that expect none. */
   cleanCaseFalsePositives: number;
@@ -315,8 +323,15 @@ export interface LiveReviewEvaluatorOptions {
    * server restarted or dropped the connection). Default 15 s.
    */
   transportRetryDelayMs?: number;
+  /** Reports from an earlier, interrupted run; those cases are not rerun. */
+  completedCases?: LiveCaseReport[];
   onCaseStart?: (fixture: LiveEvaluationFixture, index: number) => void;
-  onCaseDone?: (report: LiveCaseReport, index: number) => void;
+  /** Awaited, so callers can persist progress after every case. */
+  onCaseDone?: (
+    report: LiveCaseReport,
+    index: number,
+    casesSoFar: LiveCaseReport[],
+  ) => void | Promise<void>;
 }
 
 export class LiveReviewEvaluator {
@@ -334,15 +349,23 @@ export class LiveReviewEvaluator {
       this.#options.engineOptions ?? {},
     );
     const cases: LiveCaseReport[] = [];
+    const completed = new Map(
+      (this.#options.completedCases ?? []).map((entry) => [entry.name, entry]),
+    );
 
     for (const [index, fixture] of fixtures.entries()) {
+      const previous = completed.get(fixture.name);
+      if (previous) {
+        cases.push(previous);
+        continue;
+      }
       this.#options.onCaseStart?.(fixture, index);
       const report = await this.#evaluateCase(engine, fixture);
       cases.push(report);
-      this.#options.onCaseDone?.(report, index);
+      await this.#options.onCaseDone?.(report, index, cases);
     }
 
-    return { cases, totals: summarize(cases) };
+    return { cases, totals: summarizeReport(cases) };
   }
 
   async #evaluateCase(
@@ -399,6 +422,11 @@ export class LiveReviewEvaluator {
         findings,
         fixture.expectedFindings,
       );
+      const secondLook = diagnostics.result.secondLook ?? [];
+      const withSecondLook = matchFindings(
+        [...findings, ...secondLook],
+        fixture.expectedFindings,
+      );
       const verdicts = new Map(
         (
           (
@@ -419,6 +447,14 @@ export class LiveReviewEvaluator {
         ).length,
         publishedMediumPlus: findings.filter(isMediumPlus).length,
         nitCount: findings.filter(isNit).length,
+        matchedIncludingSecondLook: withSecondLook.matched.length,
+        secondLook: secondLook.map((finding) => ({
+          path: finding.path,
+          line: finding.line,
+          severity: finding.severity,
+          category: finding.category,
+          title: finding.title,
+        })),
         verdictsCorrect: fixture.expectedVerdicts.filter(
           (entry) => verdicts.get(entry.threadId) === entry.verdict,
         ).length,
@@ -450,6 +486,9 @@ export class LiveReviewEvaluator {
           findingType: finding.findingType,
           title: finding.title,
           body: finding.body,
+          ...(finding.verification
+            ? { verification: finding.verification }
+            : {}),
         })),
         error: null,
       };
@@ -478,6 +517,55 @@ export class LiveReviewEvaluator {
       };
     }
   }
+}
+
+/**
+ * Re-score a saved report against the current fixture labels without
+ * calling the model: used after adjudicating "unexpected" findings so the
+ * baseline and a branch are compared with the same labels.
+ */
+export function rescoreReport(
+  report: Pick<LiveEvaluationReport, "cases">,
+  fixtures: LiveEvaluationFixture[],
+): LiveEvaluationReport {
+  const byName = new Map(fixtures.map((fixture) => [fixture.name, fixture]));
+  const cases = report.cases.flatMap((entry) => {
+    const fixture = byName.get(entry.name);
+    if (!fixture) {
+      return [];
+    }
+    const findings = entry.findings as ReviewFinding[];
+    const { matched, missed, unexpected } = matchFindings(
+      findings,
+      fixture.expectedFindings,
+    );
+    const withSecondLook = matchFindings(
+      [...findings, ...((entry.secondLook ?? []) as ReviewFinding[])],
+      fixture.expectedFindings,
+    );
+    const rescored: LiveCaseReport = {
+      ...entry,
+      matchedIncludingSecondLook: withSecondLook.matched.length,
+      kind: fixture.kind,
+      stack: fixture.stack,
+      matched: matched.map((item) => ({
+        expected: describeExpected(item.expected),
+        finding: describeFinding(item.finding),
+      })),
+      missed:
+        entry.error === null ? missed.map(describeExpected) : entry.missed,
+      unexpected: unexpected.map(describeFinding),
+      matchedMediumPlus: matched.filter((item) => isMediumPlus(item.finding))
+        .length,
+      precision: findings.length === 0 ? 1 : matched.length / findings.length,
+      recall:
+        fixture.expectedFindings.length === 0
+          ? 1
+          : matched.length / fixture.expectedFindings.length,
+    };
+    return [rescored];
+  });
+  return { cases, totals: summarizeReport(cases) };
 }
 
 function median(values: number[]): number {
@@ -525,6 +613,13 @@ export function summarizeCases(
     recall: expected === 0 ? 1 : matched / expected,
     precisionMediumPlus:
       publishedMediumPlus === 0 ? 1 : matchedMediumPlus / publishedMediumPlus,
+    recallIncludingSecondLook:
+      expected === 0
+        ? 1
+        : sum(
+            cases,
+            (entry) => entry.matchedIncludingSecondLook ?? entry.matched.length,
+          ) / expected,
     nitCount: sum(cases, (entry) => entry.nitCount),
     cleanCaseFalsePositives: sum(cases, (entry) =>
       entry.matched.length + entry.missed.length === 0
@@ -561,7 +656,9 @@ function groupBy(
   );
 }
 
-function summarize(cases: LiveCaseReport[]): LiveEvaluationReport["totals"] {
+export function summarizeReport(
+  cases: LiveCaseReport[],
+): LiveEvaluationReport["totals"] {
   return {
     ...summarizeCases(cases),
     byStack: groupBy(cases, (entry) => entry.stack),

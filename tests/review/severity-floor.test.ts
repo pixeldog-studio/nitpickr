@@ -33,8 +33,8 @@ function makeResult(findings: ReviewFinding[]): ReviewEngineResult {
 
 describe("severityFloorForRound", () => {
   it.each([
-    [0, null],
-    [1, null],
+    [0, "medium"],
+    [1, "medium"],
     [2, "medium"],
     [3, "medium"],
     [4, "high"],

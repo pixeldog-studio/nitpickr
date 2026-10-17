@@ -1,4 +1,4 @@
-import { access, mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import type { ReasoningEffort } from "../config/app-config.js";
@@ -8,6 +8,7 @@ import {
   type LiveEvaluationTotals,
   LiveReviewEvaluator,
   loadLiveEvaluationFixtures,
+  summarizeReport,
   UsageTracker,
 } from "../eval/live-review-evaluator.js";
 import { createLogger } from "../logging/logger.js";
@@ -34,6 +35,8 @@ export interface EvalLiveReviewsInput {
   startedAt?: string;
   /** Commit under test, stamped into the report for baseline comparisons. */
   gitCommit?: string;
+  /** Keep cases already recorded in `outFile` and run only the rest. */
+  resume?: boolean;
 }
 
 export const DEFAULT_LIVE_FIXTURE_DIRECTORY =
@@ -60,12 +63,16 @@ function formatCase(report: LiveCaseReport): string {
   ].join(" | ");
 }
 
-function formatTotals(label: string, totals: LiveEvaluationTotals): string {
+export function formatTotals(
+  label: string,
+  totals: LiveEvaluationTotals,
+): string {
   return [
     `${label}: cases ${totals.cases}`,
     `precision(medium+) ${pct(totals.precisionMediumPlus)}`,
     `precision ${pct(totals.precision)} (${totals.matched}/${totals.published})`,
     `recall ${pct(totals.recall)} (${totals.matched}/${totals.expected})`,
+    `recall+second-look ${pct(totals.recallIncludingSecondLook)}`,
     `nits ${totals.nitCount}`,
     `clean-case FPs ${totals.cleanCaseFalsePositives}`,
     `verdicts ${totals.verdictAccuracy === null ? "n/a" : pct(totals.verdictAccuracy)}`,
@@ -115,14 +122,49 @@ export class EvalLiveReviewsCommand {
       `Live review eval: model=${input.model} baseUrl=${input.baseUrl} reasoningEffort=${input.reasoningEffort ?? "(unset)"} fixtures=${fixtures.length}`,
     );
 
+    // With --resume, cases already in the output file are kept, so a run
+    // interrupted on a slow machine continues where it stopped.
+    const completedCases: LiveCaseReport[] =
+      input.resume && input.outFile
+        ? await readFile(input.outFile, "utf8")
+            .then((text) => (JSON.parse(text) as LiveEvaluationReport).cases)
+            .catch(() => [])
+        : [];
+    if (completedCases.length > 0) {
+      write(`Resuming: ${completedCases.length} case(s) already done.`);
+    }
+    const writeReport = async (
+      cases: LiveCaseReport[],
+      final: boolean,
+    ): Promise<void> => {
+      if (!input.outFile) {
+        return;
+      }
+      const payload = {
+        model: input.model,
+        baseUrl: input.baseUrl,
+        reasoningEffort: input.reasoningEffort ?? null,
+        startedAt: input.startedAt ?? null,
+        gitCommit: input.gitCommit ?? null,
+        fixtureDirectory: directory,
+        complete: final,
+        cases,
+        totals: summarizeReport(cases),
+      };
+      await mkdir(dirname(input.outFile), { recursive: true });
+      await writeFile(input.outFile, `${JSON.stringify(payload, null, 2)}\n`);
+    };
+
     const evaluator = new LiveReviewEvaluator({
       model,
       usage,
+      completedCases,
       engineOptions: input.engineOptions ?? {},
       onCaseStart: (fixture, index) => {
         write(`[${index + 1}/${fixtures.length}] ${fixture.name} ...`);
       },
-      onCaseDone: (report) => {
+      onCaseDone: async (report, _index, casesSoFar) => {
+        await writeReport(casesSoFar, false);
         write(formatCase(report));
         for (const entry of report.matched) {
           write(`      ✓ ${entry.expected}  ←  ${entry.finding}`);
@@ -150,17 +192,7 @@ export class EvalLiveReviewsCommand {
     }
 
     if (input.outFile) {
-      const payload = {
-        model: input.model,
-        baseUrl: input.baseUrl,
-        reasoningEffort: input.reasoningEffort ?? null,
-        startedAt: input.startedAt ?? null,
-        gitCommit: input.gitCommit ?? null,
-        fixtureDirectory: directory,
-        ...report,
-      };
-      await mkdir(dirname(input.outFile), { recursive: true });
-      await writeFile(input.outFile, `${JSON.stringify(payload, null, 2)}\n`);
+      await writeReport(report.cases, true);
       write(`Wrote ${input.outFile}`);
     }
 

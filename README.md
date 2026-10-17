@@ -201,7 +201,8 @@ extraction and one repair re-prompt as a fallback for servers that ignore it.
 Recommended starting point:
 
 - a coding-tuned model that fits your hardware, for example
-  `NITPICKR_REVIEW_MODEL=qwen3.6:35b-a3b-coding-nvfp4` on Ollama
+  `NITPICKR_REVIEW_MODEL=qwen3.8:27b-nvfp4` on Ollama (the model the
+  eval suite is tuned on; its verifier verdicts are the most reliable we measured)
 
 Practical guidance:
 

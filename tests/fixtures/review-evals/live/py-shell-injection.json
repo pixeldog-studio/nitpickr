@@ -28,6 +28,12 @@
       "path": "backend/media/thumbnails.py",
       "lineStart": 10,
       "lineEnd": 11
+    },
+    {
+      "label": "path traversal: untrusted upload_name ('../' or absolute) writes outside THUMB_DIR",
+      "path": "backend/media/thumbnails.py",
+      "lineStart": 8,
+      "lineEnd": 8
     }
   ]
 }

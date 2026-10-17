@@ -1687,7 +1687,8 @@ export class WorkerRunner {
             : reviewPlan.summaryOnly
               ? "nitpickr published a summary-only review."
               : publishableResult.findings.length === 0 &&
-                  openPriorThreadCount === 0
+                  openPriorThreadCount === 0 &&
+                  (publishableResult.secondLook?.length ?? 0) === 0
                 ? "No further comments."
                 : "nitpickr review completed successfully.";
         if (reviewPlan.files.length === 0) {

@@ -8,7 +8,7 @@ import {
   isTimeoutError,
 } from "./http-client.js";
 import { normalizeModelBaseUrl } from "./model-base-url.js";
-import { ModelOutputError } from "./model-output.js";
+import { ModelOutputError, TruncatedOutputError } from "./model-output.js";
 
 /**
  * Minimal client for the `/v1/chat/completions` protocol spoken by local
@@ -16,6 +16,13 @@ import { ModelOutputError } from "./model-output.js";
  * model and the memory classifier so transport, auth, timeouts and logging
  * behave the same everywhere.
  */
+/**
+ * Output cap for every call. Reviews need ~1-2k tokens; without a cap a model
+ * stuck in a repetition loop keeps generating (Ollama shifts its context
+ * instead of stopping) until the request timeout, which blocks the queue.
+ */
+export const DEFAULT_MAX_OUTPUT_TOKENS = 6_000;
+
 export interface ChatCompletionClientConfig {
   baseUrl: string;
   model: string;
@@ -25,6 +32,8 @@ export interface ChatCompletionClientConfig {
   reasoningEffort?: ReasoningEffort | null;
   /** Abort the request after this many milliseconds. Unset = no client timeout. */
   timeoutMs?: number;
+  /** Sent as `max_tokens`; defaults to DEFAULT_MAX_OUTPUT_TOKENS. */
+  maxOutputTokens?: number;
   logger?: Logger;
 }
 
@@ -97,6 +106,7 @@ export class ChatCompletionClient {
           : {}),
         body: JSON.stringify({
           model: this.#config.model,
+          max_tokens: this.#config.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
           ...(input.temperature !== undefined
             ? { temperature: input.temperature }
             : {}),
@@ -143,10 +153,25 @@ export class ChatCompletionClient {
     }
 
     const payload = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string | null } }>;
+      choices?: Array<{
+        message?: { content?: string | null };
+        finish_reason?: string | null;
+      }>;
       usage?: ChatUsage;
     };
-    const content = payload.choices?.[0]?.message?.content;
+    const choice = payload.choices?.[0];
+    if (choice?.finish_reason === "length") {
+      this.#logger.error("model.chat_completion truncated", {
+        durationMs: elapsedMs(),
+        completionTokens: payload.usage?.completion_tokens,
+        // The tail shows what the model was repeating.
+        contentTail: choice.message?.content?.slice(-400) ?? null,
+      });
+      throw new TruncatedOutputError(
+        "Model output hit the token cap before finishing (likely a repetition loop).",
+      );
+    }
+    const content = choice?.message?.content;
     if (!content) {
       this.#logger.error("model.chat_completion empty_response", {
         durationMs: elapsedMs(),
