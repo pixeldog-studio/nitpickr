@@ -245,6 +245,7 @@ pnpm dev:worker
 ### Useful commands
 
 ```bash
+pnpm check                             # everything CI runs: lint, typecheck, test, site build
 pnpm lint
 pnpm typecheck
 pnpm test

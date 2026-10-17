@@ -1,7 +1,13 @@
 dist
 node_modules
 .env
-.env.local
+.env.*
+!.env.example
 .DS_Store
 coverage
 *.log
+
+# Agent and worktree state (per machine, never shared)
+.claude/worktrees/
+.claude/settings.local.json
+.worktrees/

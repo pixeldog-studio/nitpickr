@@ -94,12 +94,11 @@ Useful health endpoints while developing:
 
 ## What to test
 
-Run the full quality bar before opening a PR:
+Run the full quality bar before opening a PR. `pnpm check` runs exactly what CI
+runs (lint, typecheck, tests, site build):
 
 ```bash
-pnpm lint
-pnpm typecheck
-pnpm test
+pnpm check
 ```
 
 Also run this when you change prompt construction, review behavior, or scoring:

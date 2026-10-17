@@ -103,6 +103,37 @@ describe("GitHubRestClient", () => {
     expect(contents).toContain("review:");
   });
 
+  it("skips file contents that contain NUL bytes", async () => {
+    const client = new GitHubRestClient(
+      {
+        async getInstallationAccessToken() {
+          return "ghs_token";
+        },
+      },
+      async () =>
+        new Response(
+          JSON.stringify({
+            type: "file",
+            content: Buffer.from([0x50, 0x4e, 0x47, 0x00, 0x01]).toString(
+              "base64",
+            ),
+            encoding: "base64",
+          }),
+          { status: 200 },
+        ),
+    );
+
+    const contents = await client.getFileContent({
+      installationId: "123456",
+      owner: "rubenspessoa",
+      repo: "nitpickr",
+      path: "assets/logo.png",
+      ref: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    });
+
+    expect(contents).toBeNull();
+  });
+
   it("lists files in a repository directory", async () => {
     const client = new GitHubRestClient(
       {
