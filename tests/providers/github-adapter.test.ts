@@ -1013,6 +1013,18 @@ describe("classifyInteraction", () => {
       "Why is this a problem? input is validated upstream",
     ],
     ["reconsider", true, "reconsider", null],
+    [
+      "Hey @nitpickrai, why does this need a lock?",
+      false,
+      "ask",
+      "Hey why does this need a lock?",
+    ],
+    [
+      "*(note)* @nitpickrai what calls this?",
+      false,
+      "ask",
+      "*(note)* what calls this?",
+    ],
   ])("%s", (body, inThread, command, argumentText) => {
     expect(classifyInteraction(body, bots, { inThread })).toEqual({
       command,
@@ -1024,6 +1036,8 @@ describe("classifyInteraction", () => {
     ["Thanks @nitpickrai!", false],
     ["> @nitpickrai why\nagreed with the above", false],
     ["```\n@nitpickrai review\n```", false],
+    ["see `@nitpickrai why` in the docs", false],
+    ["mail me at me@nitpickrai.dev", false],
     ["@alice can you take this?", true],
     ["thanks, done", true],
   ])("ignores %s", (body, inThread) => {
