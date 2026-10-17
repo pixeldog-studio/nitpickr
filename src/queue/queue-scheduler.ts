@@ -70,7 +70,11 @@ export interface JobStore {
     /** Only jobs queued before the running one; newer pushes keep theirs. */
     createdBefore: Date;
   }): Promise<{ canceledCount: number; checkRunIds: string[] }>;
-  setJobCheckRun(jobId: string, checkRunId: string): Promise<boolean>;
+  setJobCheckRun(
+    jobId: string,
+    checkRunId: string,
+    checkRunSha: string,
+  ): Promise<boolean>;
   requeueWorkerJobs(workerId: string, requeuedAt: Date): Promise<number>;
   cancelQueuedReviewJobs(input: {
     repositoryId: string;
@@ -223,10 +227,16 @@ export class QueueScheduler {
     return this.#store.cancelQueuedReviewJobs(input);
   }
 
-  async attachCheckRun(jobId: string, checkRunId: string): Promise<boolean> {
+  /** `checkRunSha`: the commit the check is on (the PR head when queued). */
+  async attachCheckRun(
+    jobId: string,
+    checkRunId: string,
+    checkRunSha: string,
+  ): Promise<boolean> {
     assertNonEmpty(jobId, "jobId");
     assertNonEmpty(checkRunId, "checkRunId");
-    return this.#store.setJobCheckRun(jobId, checkRunId);
+    assertNonEmpty(checkRunSha, "checkRunSha");
+    return this.#store.setJobCheckRun(jobId, checkRunId, checkRunSha);
   }
 
   /** Hand a stopping worker's running jobs back to the queue. */

@@ -864,6 +864,21 @@ export class GitHubAdapter {
     );
   }
 
+  /** The PR's current head commit (for comment commands, which carry none). */
+  async getPullRequestHeadSha(input: {
+    installationId: string;
+    repository: { owner: string; name: string };
+    pullNumber: number;
+  }): Promise<string> {
+    const pullRequest = await this.#apiClient.getPullRequest({
+      installationId: input.installationId,
+      owner: input.repository.owner,
+      repo: input.repository.name,
+      pullNumber: input.pullNumber,
+    });
+    return pullRequest.head.sha;
+  }
+
   async fetchChangeRequestContext(input: {
     installationId: string;
     repository: {

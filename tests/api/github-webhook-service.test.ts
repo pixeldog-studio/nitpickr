@@ -331,6 +331,53 @@ describe("GitHubWebhookService", () => {
     expect(attached).toEqual([["job_1", "check_9"]]);
   });
 
+  it("puts the queued check on the PR head for an @nitpickr review comment", async () => {
+    const adapter = Object.assign(new FakeGitHubAdapter(), {
+      getPullRequestHeadSha: async () => "e".repeat(40),
+    });
+    adapter.normalizedEvent = {
+      ...adapter.normalizedEvent,
+      kind: "review_requested",
+      trigger: {
+        type: "manual_command",
+        command: "review",
+        actorLogin: "ruben",
+      },
+      mode: "quick",
+    } as GitHubNormalizedEvent;
+    const attached: unknown[][] = [];
+    const queued: string[] = [];
+    const service = new GitHubWebhookService(
+      adapter,
+      Object.assign(new FakeQueueScheduler(), {
+        async attachCheckRun(...args: unknown[]) {
+          attached.push(args);
+          return true;
+        },
+      }),
+      new FakeWebhookEventService(),
+      new FakeLogger(),
+      {
+        statusPublisher: {
+          async markQueued(input) {
+            queued.push(input.sha);
+            return "check_m";
+          },
+          async markClosed() {},
+        },
+      },
+    );
+    await service.handle({
+      deliveryId: "delivery-comment",
+      eventName: "issue_comment",
+      signature: "sha256=test",
+      rawBody: "{}",
+      payload: {},
+    });
+    expect(queued).toEqual(["e".repeat(40)]);
+    expect(attached).toEqual([["job_1", "check_m", "e".repeat(40)]]);
+  });
+
   it("does not add a second queued check when the job already existed", async () => {
     const adapter = new FakeGitHubAdapter();
     adapter.normalizedEvent = {
