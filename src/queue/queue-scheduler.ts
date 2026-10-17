@@ -69,7 +69,8 @@ export interface JobStore {
     headSha: string;
     /** Only jobs queued before the running one; newer pushes keep theirs. */
     createdBefore: Date;
-  }): Promise<number>;
+  }): Promise<{ canceledCount: number; checkRunIds: string[] }>;
+  setJobCheckRun(jobId: string, checkRunId: string): Promise<boolean>;
   requeueStaleRunningJobs(input: {
     activeWorkerIds: string[];
     staleStartedBefore: Date;
@@ -199,12 +200,18 @@ export class QueueScheduler {
     headSha: string;
     /** Only jobs queued before the running one; newer pushes keep theirs. */
     createdBefore: Date;
-  }): Promise<number> {
+  }): Promise<{ canceledCount: number; checkRunIds: string[] }> {
     assertNonEmpty(input.repositoryId, "repositoryId");
     assertNonEmpty(input.changeRequestId, "changeRequestId");
     assertNonEmpty(input.headSha, "headSha");
 
     return this.#store.cancelSupersededReviewJobs(input);
+  }
+
+  async attachCheckRun(jobId: string, checkRunId: string): Promise<boolean> {
+    assertNonEmpty(jobId, "jobId");
+    assertNonEmpty(checkRunId, "checkRunId");
+    return this.#store.setJobCheckRun(jobId, checkRunId);
   }
 
   async recoverStaleRunningJobs(input: {

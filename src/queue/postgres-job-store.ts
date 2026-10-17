@@ -183,7 +183,10 @@ export class PostgresJobStore implements JobStore {
         input.priority,
         input.status,
         input.attempts,
-        JSON.stringify(input.payload),
+        // Pass the object: postgres.js encodes jsonb parameters itself, and a
+        // pre-stringified payload is stored as a jsonb *string*, which makes
+        // every `payload->>'…'` query (supersede, check runs) match nothing.
+        input.payload,
         input.maxAttempts,
         input.createdAt,
         input.scheduledAt,
@@ -299,8 +302,11 @@ export class PostgresJobStore implements JobStore {
     headSha: string;
     /** Only jobs queued before the running one; newer pushes keep theirs. */
     createdBefore: Date;
-  }): Promise<number> {
-    const rows = await this.#client.unsafe<{ canceled_count: number }>(
+  }): Promise<{ canceledCount: number; checkRunIds: string[] }> {
+    const rows = await this.#client.unsafe<{
+      canceled_count: number;
+      check_run_ids: string[] | null;
+    }>(
       `
         with canceled as (
           update jobs
@@ -313,9 +319,10 @@ export class PostgresJobStore implements JobStore {
             and payload->>'headSha' is not null
             and payload->>'headSha' <> $3
             and created_at < $4
-          returning id
+          returning id, payload->>'checkRunId' as check_run_id
         )
-        select count(*)::int as canceled_count
+        select count(*)::int as canceled_count,
+               array_remove(array_agg(check_run_id), null) as check_run_ids
         from canceled
       `,
       [
@@ -326,7 +333,27 @@ export class PostgresJobStore implements JobStore {
       ],
     );
 
-    return rows[0]?.canceled_count ?? 0;
+    return {
+      canceledCount: rows[0]?.canceled_count ?? 0,
+      checkRunIds: rows[0]?.check_run_ids ?? [],
+    };
+  }
+
+  /**
+   * Record the queued check run so the worker updates it instead. False
+   * when the job already left the queue (claimed or canceled meanwhile).
+   */
+  async setJobCheckRun(jobId: string, checkRunId: string): Promise<boolean> {
+    const rows = await this.#client.unsafe<{ id: string }>(
+      `
+        update jobs
+        set payload = payload || jsonb_build_object('checkRunId', $2::text)
+        where id = $1 and status = 'queued'
+        returning id
+      `,
+      [jobId, checkRunId],
+    );
+    return rows.length > 0;
   }
 
   async requeueStaleRunningJobs(input: {

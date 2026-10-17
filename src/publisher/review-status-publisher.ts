@@ -8,7 +8,7 @@ export interface ReviewStatusClient {
     sha: string;
     name: string;
     externalId: string;
-    status: "in_progress" | "completed";
+    status: "queued" | "in_progress" | "completed";
     conclusion?: "success" | "neutral" | "failure";
     title: string;
     summary: string;
@@ -22,7 +22,7 @@ export interface ReviewStatusClient {
       name: string;
     };
     checkRunId: string;
-    status: "in_progress" | "completed";
+    status: "queued" | "in_progress" | "completed";
     conclusion?: "success" | "neutral" | "failure";
     title: string;
     summary: string;
@@ -57,7 +57,99 @@ export class ReviewStatusPublisher {
     this.#client = client;
   }
 
-  async markPending(input: ReviewStatusUpdate): Promise<string> {
+  /**
+   * Shown as soon as a review is queued, so a PR never looks idle while
+   * the single local model works through earlier reviews.
+   */
+  async markQueued(input: {
+    installationId: string;
+    repository: { owner: string; name: string };
+    sha: string;
+    externalId: string;
+  }): Promise<string> {
+    const created = await this.#client.createCheckRun({
+      installationId: input.installationId,
+      repository: input.repository,
+      sha: input.sha,
+      name: REVIEW_CHECK_NAME,
+      externalId: input.externalId,
+      status: "queued",
+      title: "nitpickr review queued",
+      summary:
+        "Queued. nitpickr reviews one pull request at a time on a local model; this review starts as soon as the reviews ahead of it finish.",
+    });
+    return created.checkRunId;
+  }
+
+  /** A newer push replaced this commit's review before it started. */
+  async markSuperseded(input: {
+    installationId: string;
+    repository: { owner: string; name: string };
+    checkRunId: string;
+  }): Promise<void> {
+    await this.markClosed({
+      ...input,
+      conclusion: "neutral",
+      title: "Superseded by a newer push",
+      summary: "nitpickr reviews the latest commit instead of this one.",
+    });
+  }
+
+  /** Close a check with a final state and the reason. */
+  async markClosed(input: {
+    installationId: string;
+    repository: { owner: string; name: string };
+    checkRunId: string;
+    conclusion: "success" | "neutral" | "failure";
+    title: string;
+    summary: string;
+  }): Promise<void> {
+    await this.#client.updateCheckRun({
+      installationId: input.installationId,
+      repository: input.repository,
+      checkRunId: input.checkRunId,
+      status: "completed",
+      conclusion: input.conclusion,
+      title: input.title,
+      summary: input.summary,
+    });
+  }
+
+  /** Back to queued while the job waits for its retry. */
+  async markRequeued(input: {
+    installationId: string;
+    repository: { owner: string; name: string };
+    checkRunId: string;
+    summary: string;
+  }): Promise<void> {
+    await this.#client.updateCheckRun({
+      installationId: input.installationId,
+      repository: input.repository,
+      checkRunId: input.checkRunId,
+      status: "queued",
+      title: "nitpickr review retry scheduled",
+      summary: input.summary,
+    });
+  }
+
+  /**
+   * Move a review to "in progress". Reuses the check created when the job
+   * was queued, so the PR shows one nitpickr check that changes state.
+   */
+  async markPending(
+    input: ReviewStatusUpdate & { checkRunId?: string | null },
+  ): Promise<string> {
+    if (input.checkRunId) {
+      await this.#client.updateCheckRun({
+        installationId: input.installationId,
+        repository: input.repository,
+        checkRunId: input.checkRunId,
+        status: "in_progress",
+        title: "nitpickr review is running",
+        summary: toOutputSummary(input.description, input.summary),
+      });
+      return input.checkRunId;
+    }
     const created = await this.#client.createCheckRun({
       installationId: input.installationId,
       repository: input.repository,

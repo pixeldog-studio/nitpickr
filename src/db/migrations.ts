@@ -288,6 +288,13 @@ export function buildMigrations(options: MigrationOptions = {}): string[] {
       primary key (repository_id, provider_comment_id)
     );
   `,
+    // Job payloads used to be stored double-encoded (a jsonb string holding
+    // JSON), so SQL could not read fields inside them. Unwrap them once.
+    `
+    update jobs
+    set payload = (payload #>> '{}')::jsonb
+    where jsonb_typeof(payload) = 'string';
+  `,
     // Re-shape memories.embedding when the configured dimension changes (e.g.
     // switching from text-embedding-3-small/1536 to nomic-embed-text/768).
     // Existing vectors cannot be converted, so they are cleared; memory recall

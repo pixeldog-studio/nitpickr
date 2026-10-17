@@ -565,7 +565,13 @@ type ReviewStatusPhase = "pending" | "published" | "skipped" | "failed";
 const noopStatusPublisher: Pick<
   ReviewStatusPublisher,
   "markFailed" | "markPending" | "markPublished" | "markSkipped"
-> = {
+> &
+  Partial<
+    Pick<
+      ReviewStatusPublisher,
+      "markSuperseded" | "markClosed" | "markRequeued"
+    >
+  > = {
   async markFailed() {
     return undefined;
   },
@@ -575,6 +581,23 @@ const noopStatusPublisher: Pick<
   async markPublished() {},
   async markSkipped() {},
 };
+
+type QueuedCheckOutcome =
+  | { kind: "retry"; summary: string }
+  | {
+      kind: "close";
+      conclusion: "success" | "neutral" | "failure";
+      title: string;
+      summary: string;
+    };
+
+/** The check the API created when the job was queued, and whether it's done. */
+interface QueuedCheck {
+  checkRunId: string | null;
+  settled: boolean;
+  /** Why the job ended without a review, when it did. */
+  endedEarly: QueuedCheckOutcome | null;
+}
 
 function parseReviewJobPayload(payload: QueueJob["payload"]): {
   correlationId: string | null;
@@ -588,6 +611,8 @@ function parseReviewJobPayload(payload: QueueJob["payload"]): {
   trigger: ReturnType<typeof parseReviewTrigger>;
   /** Commit the job was queued for; null for comment commands. */
   headSha: string | null;
+  /** The queued check the API created for this job, if any. */
+  checkRunId: string | null;
 } {
   const installationId = payload.installationId;
   const repository = payload.repository as Record<string, unknown> | undefined;
@@ -639,6 +664,10 @@ function parseReviewJobPayload(payload: QueueJob["payload"]): {
     headSha:
       typeof payload.headSha === "string" && payload.headSha.length > 0
         ? payload.headSha
+        : null,
+    checkRunId:
+      typeof payload.checkRunId === "string" && payload.checkRunId.length > 0
+        ? payload.checkRunId
         : null,
   };
 }
@@ -950,7 +979,13 @@ export interface WorkerRunnerDependencies {
   statusPublisher?: Pick<
     ReviewStatusPublisher,
     "markFailed" | "markPending" | "markPublished" | "markSkipped"
-  >;
+  > &
+    Partial<
+      Pick<
+        ReviewStatusPublisher,
+        "markSuperseded" | "markClosed" | "markRequeued"
+      >
+    >;
 }
 
 export class WorkerRunner {
@@ -974,7 +1009,13 @@ export class WorkerRunner {
   readonly #statusPublisher: Pick<
     ReviewStatusPublisher,
     "markFailed" | "markPending" | "markPublished" | "markSkipped"
-  >;
+  > &
+    Partial<
+      Pick<
+        ReviewStatusPublisher,
+        "markSuperseded" | "markClosed" | "markRequeued"
+      >
+    >;
   readonly #discussionAcknowledgmentStore: DiscussionAcknowledgmentStore | null;
   readonly #now: () => Date;
   readonly #repositoryAllowlist: Set<string> | null;
@@ -1123,7 +1164,106 @@ export class WorkerRunner {
     }
   }
 
+  /**
+   * Runs a review and guarantees the check created when it was queued ends
+   * in a truthful state on every exit: back to queued when the job will
+   * retry, failed when it won't, or closed with the reason it ended early.
+   */
   async #processReviewJob(job: QueueJob, jobLogger: Logger): Promise<void> {
+    const queuedCheck: QueuedCheck = {
+      checkRunId:
+        typeof job.payload.checkRunId === "string" &&
+        job.payload.checkRunId.length > 0
+          ? job.payload.checkRunId
+          : null,
+      settled: false,
+      endedEarly: null,
+    };
+    try {
+      await this.#runReviewJob(job, jobLogger, queuedCheck);
+    } catch (error) {
+      const retryable =
+        error instanceof ReviewJobError ? error.retryable : false;
+      await this.#settleQueuedCheck(
+        job,
+        queuedCheck,
+        retryable && job.attempts + 1 < job.maxAttempts
+          ? { kind: "retry", summary: toErrorMessage(error) }
+          : {
+              kind: "close",
+              conclusion: "failure",
+              title: "nitpickr review failed",
+              summary: toErrorMessage(error),
+            },
+        jobLogger,
+      );
+      throw error;
+    }
+    await this.#settleQueuedCheck(
+      job,
+      queuedCheck,
+      queuedCheck.endedEarly ?? {
+        kind: "close",
+        conclusion: "neutral",
+        title: "nitpickr review ended",
+        summary: "nitpickr finished this job without a review result.",
+      },
+      jobLogger,
+    );
+  }
+
+  async #settleQueuedCheck(
+    job: QueueJob,
+    queuedCheck: QueuedCheck,
+    outcome: QueuedCheckOutcome,
+    logger: Logger,
+  ): Promise<void> {
+    const checkRunId = queuedCheck.checkRunId;
+    const repository = job.payload.repository as
+      | { owner: string; name: string }
+      | undefined;
+    const installationId = job.payload.installationId;
+    if (
+      checkRunId === null ||
+      queuedCheck.settled ||
+      repository === undefined ||
+      typeof installationId !== "string"
+    ) {
+      return;
+    }
+    try {
+      if (outcome.kind === "retry") {
+        await this.#statusPublisher.markRequeued?.({
+          installationId,
+          repository,
+          checkRunId,
+          summary: outcome.summary,
+        });
+      } else {
+        await this.#statusPublisher.markClosed?.({
+          installationId,
+          repository,
+          checkRunId,
+          conclusion: outcome.conclusion,
+          title: outcome.title,
+          summary: outcome.summary,
+        });
+      }
+      queuedCheck.settled = true;
+    } catch (error) {
+      logger.warn("Failed to settle the queued review check.", {
+        jobId: job.id,
+        checkRunId,
+        error: toErrorMessage(error),
+      });
+    }
+  }
+
+  async #runReviewJob(
+    job: QueueJob,
+    jobLogger: Logger,
+    queuedCheck: QueuedCheck,
+  ): Promise<void> {
     let payload: ReturnType<typeof parseReviewJobPayload>;
     try {
       payload = parseReviewJobPayload(job.payload);
@@ -1178,6 +1318,22 @@ export class WorkerRunner {
           queuedHeadSha: payload.headSha,
           currentHeadSha: context.changeRequest.headSha,
         });
+        queuedCheck.endedEarly =
+          payload.headSha !== null &&
+          payload.headSha !== context.changeRequest.headSha
+            ? {
+                kind: "close",
+                conclusion: "neutral",
+                title: "Superseded by a newer push",
+                summary:
+                  "nitpickr reviews the latest commit instead of this one.",
+              }
+            : {
+                kind: "close",
+                conclusion: "neutral",
+                title: "Already reviewed",
+                summary: "nitpickr already reviewed this commit.",
+              };
         return;
       }
       const reviewScope = determineReviewScope(
@@ -1214,22 +1370,59 @@ export class WorkerRunner {
             })()
           : context.files;
 
-      const supersededCount =
-        await this.#queueScheduler.cancelSupersededReviewJobs({
-          repositoryId: job.repositoryId,
-          changeRequestId:
-            job.changeRequestId ?? `${job.repositoryId}:${payload.pullNumber}`,
-          headSha: context.changeRequest.headSha,
-          createdBefore: job.createdAt,
-        });
-      if (supersededCount > 0) {
+      const superseded = await this.#queueScheduler.cancelSupersededReviewJobs({
+        repositoryId: job.repositoryId,
+        changeRequestId:
+          job.changeRequestId ?? `${job.repositoryId}:${payload.pullNumber}`,
+        headSha: context.changeRequest.headSha,
+        createdBefore: job.createdAt,
+      });
+      if (superseded.canceledCount > 0) {
         logger.info("Superseded queued review jobs for newer head SHA.", {
           jobId: job.id,
           repositoryId: job.repositoryId,
           changeRequestId:
             job.changeRequestId ?? `${job.repositoryId}:${payload.pullNumber}`,
-          supersededCount,
+          supersededCount: superseded.canceledCount,
         });
+      }
+      // Their queued checks would otherwise sit at "queued" forever; so
+      // would this job's own, if a newer push moved the PR head meanwhile.
+      const staleCheckRunIds = [
+        ...superseded.checkRunIds,
+        ...(payload.checkRunId &&
+        payload.headSha !== null &&
+        payload.headSha !== context.changeRequest.headSha
+          ? [payload.checkRunId]
+          : []),
+      ];
+      for (const staleCheckRunId of staleCheckRunIds) {
+        try {
+          await this.#statusPublisher.markSuperseded?.({
+            installationId: payload.installationId,
+            repository: payload.repository,
+            checkRunId: staleCheckRunId,
+          });
+          if (staleCheckRunId === queuedCheck.checkRunId) {
+            queuedCheck.settled = true;
+          }
+        } catch (error) {
+          logger.warn("Failed to mark a superseded review check.", {
+            jobId: job.id,
+            checkRunId: staleCheckRunId,
+            error: toErrorMessage(error),
+          });
+        }
+      }
+      const queuedCheckRunId =
+        payload.checkRunId && !staleCheckRunIds.includes(payload.checkRunId)
+          ? payload.checkRunId
+          : null;
+      if (queuedCheckRunId) {
+        // A failure before the repo config loads must still close the
+        // queued check instead of leaving it "queued" forever.
+        checkRunId = queuedCheckRunId;
+        statusChecksEnabled = true;
       }
 
       let instructionBundle: InstructionBundle;
@@ -1243,6 +1436,25 @@ export class WorkerRunner {
         throw classifyReviewError("github", error);
       }
       statusChecksEnabled = instructionBundle.config.statusChecks.enabled;
+      if (!statusChecksEnabled && checkRunId) {
+        try {
+          await this.#statusPublisher.markSkipped({
+            installationId: payload.installationId,
+            repository: payload.repository,
+            sha: context.changeRequest.headSha,
+            reviewRunId: `queued:${job.id}`,
+            checkRunId,
+            description: "Status checks are turned off for this repository.",
+          });
+          queuedCheck.settled = true;
+        } catch (error) {
+          logger.warn("Failed to close the queued review check.", {
+            jobId: job.id,
+            error: toErrorMessage(error),
+          });
+        }
+        checkRunId = null;
+      }
       const reviewPlan = this.#reviewPlanner.plan({
         mode: payload.mode,
         config: instructionBundle.config,
@@ -1306,6 +1518,7 @@ export class WorkerRunner {
               sha: context.changeRequest.headSha,
               reviewRunId: startedReviewRunId,
               description: "nitpickr review is running.",
+              ...(queuedCheckRunId ? { checkRunId: queuedCheckRunId } : {}),
             }),
         );
         if (pendingCheckRunId) {
@@ -1317,9 +1530,11 @@ export class WorkerRunner {
             repositoryId: job.repositoryId,
             sha: context.changeRequest.headSha,
           });
-        } else {
+        } else if (queuedCheckRunId === null) {
           statusChecksEnabled = false;
         }
+        // With a queued check, keep updating it: the final PATCH may still
+        // land, and the job's settle step closes it otherwise.
       }
 
       const memoryCharBudget = Math.max(reviewPlan.commentBudget * 200, 1_000);
@@ -1718,6 +1933,20 @@ export class WorkerRunner {
                   (publishableResult.secondLook?.length ?? 0) === 0
                 ? "No further comments."
                 : "nitpickr review completed successfully.";
+        queuedCheck.endedEarly =
+          reviewPlan.files.length === 0
+            ? {
+                kind: "close",
+                conclusion: "neutral",
+                title: "nitpickr review skipped",
+                summary: description,
+              }
+            : {
+                kind: "close",
+                conclusion: "success",
+                title: "nitpickr review completed",
+                summary: description,
+              };
         if (reviewPlan.files.length === 0) {
           const published = await this.#publishReviewStatus(
             "skipped",
@@ -1739,6 +1968,9 @@ export class WorkerRunner {
                 summary: result.summary,
               }),
           );
+          if (published !== null && checkRunId === queuedCheck.checkRunId) {
+            queuedCheck.settled = true;
+          }
           if (published !== null) {
             logger.info("Published final review status.", {
               jobId: job.id,
@@ -1770,6 +2002,9 @@ export class WorkerRunner {
                 summary: result.summary,
               }),
           );
+          if (published !== null && checkRunId === queuedCheck.checkRunId) {
+            queuedCheck.settled = true;
+          }
           if (published !== null) {
             logger.info("Published final review status.", {
               jobId: job.id,
@@ -1798,10 +2033,19 @@ export class WorkerRunner {
               : toErrorMessage(error),
         });
       }
+      // The queued check is reused by the retry: the settle step puts it
+      // back to queued. Any other check is completed here.
+      const retryReusesCheck =
+        error instanceof ReviewJobError &&
+        error.retryable &&
+        job.attempts + 1 < job.maxAttempts &&
+        checkRunId !== null &&
+        checkRunId === queuedCheck.checkRunId;
       if (
         statusChecksEnabled &&
         changeRequestContext !== null &&
-        error instanceof ReviewJobError
+        error instanceof ReviewJobError &&
+        !retryReusesCheck
       ) {
         const failureContext = changeRequestContext;
         const published = await this.#publishReviewStatus(
@@ -1823,10 +2067,14 @@ export class WorkerRunner {
               reviewRunId: reviewRunId ?? `failed:${job.id}`,
               description: `nitpickr ${error.failureClass.replace(/_/g, " ")}.`,
               summary: error.message,
-              retryable: error.retryable,
+              // "Retry scheduled" only while attempts remain.
+              retryable: error.retryable && job.attempts + 1 < job.maxAttempts,
               ...(checkRunId ? { checkRunId } : {}),
             }),
         );
+        if (published !== null && checkRunId === queuedCheck.checkRunId) {
+          queuedCheck.settled = true;
+        }
         if (published !== null) {
           logger.info("Published failed review status.", {
             jobId: job.id,

@@ -36,7 +36,10 @@ export function createSetupAwareGitHubWebhookHandler(input: {
         input.runtime.queueScheduler,
         input.runtime.webhookEventService,
         logger,
-        { repositoryAllowlist: input.runtime.config.repositoryAllowlist },
+        {
+          repositoryAllowlist: input.runtime.config.repositoryAllowlist,
+          statusPublisher: operationalRuntime.reviewStatusPublisher,
+        },
       ));
 
   return {

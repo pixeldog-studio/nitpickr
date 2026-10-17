@@ -181,3 +181,46 @@ describe("ReviewStatusPublisher", () => {
     ]);
   });
 });
+
+describe("queued review checks", () => {
+  const repository = { owner: "o", name: "r" };
+
+  it("creates a queued check and later moves the same check to in progress", async () => {
+    const client = new FakeReviewStatusClient();
+    const publisher = new ReviewStatusPublisher(client);
+    const queued = await publisher.markQueued({
+      installationId: "1",
+      repository,
+      sha: "a".repeat(40),
+      externalId: "job_1",
+    });
+    const running = await publisher.markPending({
+      installationId: "1",
+      repository,
+      sha: "a".repeat(40),
+      reviewRunId: "run_1",
+      description: "nitpickr review is running.",
+      checkRunId: queued,
+    });
+    expect(running).toBe(queued);
+    expect(client.calls.map((call) => [call.type, call.status])).toEqual([
+      ["create", "queued"],
+      ["update", "in_progress"],
+    ]);
+  });
+
+  it("closes a superseded check as neutral", async () => {
+    const client = new FakeReviewStatusClient();
+    await new ReviewStatusPublisher(client).markSuperseded({
+      installationId: "1",
+      repository,
+      checkRunId: "check-run-1",
+    });
+    expect(client.calls[0]).toMatchObject({
+      type: "update",
+      status: "completed",
+      conclusion: "neutral",
+      title: "Superseded by a newer push",
+    });
+  });
+});

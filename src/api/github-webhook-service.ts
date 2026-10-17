@@ -6,8 +6,10 @@ import type {
   GitHubAdapter,
   GitHubNormalizedEvent,
 } from "../providers/github/github-adapter.js";
+import type { ReviewStatusPublisher } from "../publisher/review-status-publisher.js";
 import type {
   EnqueueJobInput,
+  QueueJob,
   QueueScheduler,
 } from "../queue/queue-scheduler.js";
 import type { WebhookEventService } from "./webhook-event-service.js";
@@ -159,7 +161,12 @@ export class GitHubWebhookService implements GitHubWebhookHandler {
     GitHubAdapter,
     "verifyWebhookSignature" | "normalizeWebhookEvent" | "reactToMention"
   >;
-  readonly #queueScheduler: Pick<QueueScheduler, "enqueue">;
+  readonly #queueScheduler: Pick<QueueScheduler, "enqueue"> &
+    Partial<Pick<QueueScheduler, "attachCheckRun">>;
+  readonly #statusPublisher: Pick<
+    ReviewStatusPublisher,
+    "markQueued" | "markClosed"
+  > | null;
   readonly #logger: Logger;
   readonly #webhookEventService: WebhookEventTracker;
   /** Lower-cased `owner/name` entries; `null` allows every repository. */
@@ -170,13 +177,21 @@ export class GitHubWebhookService implements GitHubWebhookHandler {
       GitHubAdapter,
       "verifyWebhookSignature" | "normalizeWebhookEvent" | "reactToMention"
     >,
-    queueScheduler: Pick<QueueScheduler, "enqueue">,
+    queueScheduler: Pick<QueueScheduler, "enqueue"> &
+      Partial<Pick<QueueScheduler, "attachCheckRun">>,
     webhookEventService: WebhookEventTracker,
     logger: Logger = noopLogger,
-    options: { repositoryAllowlist?: string[] | null } = {},
+    options: {
+      repositoryAllowlist?: string[] | null;
+      statusPublisher?: Pick<
+        ReviewStatusPublisher,
+        "markQueued" | "markClosed"
+      > | null;
+    } = {},
   ) {
     this.#adapter = adapter;
     this.#queueScheduler = queueScheduler;
+    this.#statusPublisher = options.statusPublisher ?? null;
     this.#logger = logger.child({
       component: "github-webhook",
     });
@@ -184,6 +199,84 @@ export class GitHubWebhookService implements GitHubWebhookHandler {
     this.#repositoryAllowlist = options.repositoryAllowlist
       ? new Set(options.repositoryAllowlist.map((entry) => entry.toLowerCase()))
       : null;
+  }
+
+  /**
+   * Put a queued "nitpickr / review" check on the commit right away, so the
+   * PR shows nitpickr is coming even while earlier reviews hold the model.
+   * Only for a job this delivery created; a deduped job already has one.
+   */
+  async #showQueued(
+    job: QueueJob,
+    event: Extract<GitHubNormalizedEvent, { kind: "review_requested" }>,
+    deliveryId: string | undefined,
+    logger: Logger,
+  ): Promise<void> {
+    const headSha = job.payload.headSha;
+    if (
+      this.#statusPublisher === null ||
+      !this.#queueScheduler.attachCheckRun ||
+      job.status !== "queued" ||
+      typeof headSha !== "string" ||
+      headSha.length === 0 ||
+      (deliveryId !== undefined && job.payload.correlationId !== deliveryId)
+    ) {
+      return;
+    }
+    let checkRunId: string | null = null;
+    try {
+      checkRunId = await this.#statusPublisher.markQueued({
+        installationId: event.installationId,
+        repository: {
+          owner: event.repository.owner,
+          name: event.repository.name,
+        },
+        sha: headSha,
+        externalId: job.id,
+      });
+      const attached = await this.#queueScheduler.attachCheckRun(
+        job.id,
+        checkRunId,
+      );
+      if (!attached) {
+        // A worker took the job (and opened its own check) or a newer push
+        // canceled it while this check was being created.
+        await this.#statusPublisher.markClosed({
+          installationId: event.installationId,
+          repository: {
+            owner: event.repository.owner,
+            name: event.repository.name,
+          },
+          checkRunId,
+          conclusion: "neutral",
+          title: "Handled by another nitpickr check",
+          summary:
+            "This review already started or was replaced by a newer push.",
+        });
+      }
+    } catch (error) {
+      logger.warn("Failed to publish queued review status.", {
+        jobId: job.id,
+        error: toErrorMessage(error, "Unknown status failure."),
+      });
+      if (checkRunId !== null) {
+        // Created but not attached: the worker can't find it, so close it.
+        await this.#statusPublisher
+          .markClosed({
+            installationId: event.installationId,
+            repository: {
+              owner: event.repository.owner,
+              name: event.repository.name,
+            },
+            checkRunId,
+            conclusion: "neutral",
+            title: "Handled by another nitpickr check",
+            summary:
+              "nitpickr could not track this check; see the review's own check.",
+          })
+          .catch(() => {});
+      }
+    }
   }
 
   async verifySignature(rawBody: string, signature: string): Promise<boolean> {
@@ -374,11 +467,19 @@ export class GitHubWebhookService implements GitHubWebhookHandler {
     }
 
     try {
-      await this.#queueScheduler.enqueue(
+      const job = await this.#queueScheduler.enqueue(
         normalized.kind === "review_requested"
           ? buildReviewJobInput(normalized, parsed.deliveryId)
           : buildInteractionJobInput(normalized, parsed.deliveryId),
       );
+      if (normalized.kind === "review_requested") {
+        await this.#showQueued(
+          job,
+          normalized,
+          parsed.deliveryId,
+          requestLogger,
+        );
+      }
       await this.#updateWebhookEventStatus(parsed.deliveryId, "queued", {
         ...buildReviewStatusFields(normalized),
       });

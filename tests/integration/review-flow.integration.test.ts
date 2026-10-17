@@ -140,7 +140,7 @@ class InMemoryJobStore implements JobStore {
     repositoryId: string;
     changeRequestId: string;
     headSha: string;
-  }): Promise<number> {
+  }): Promise<{ canceledCount: number; checkRunIds: string[] }> {
     let canceled = 0;
 
     for (const [jobId, job] of this.jobs.entries()) {
@@ -160,7 +160,11 @@ class InMemoryJobStore implements JobStore {
       }
     }
 
-    return canceled;
+    return { canceledCount: canceled, checkRunIds: [] };
+  }
+
+  async setJobCheckRun(): Promise<boolean> {
+    return true;
   }
 
   async requeueStaleRunningJobs(): Promise<number> {
