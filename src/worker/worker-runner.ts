@@ -2067,7 +2067,8 @@ export class WorkerRunner {
               reviewRunId: reviewRunId ?? `failed:${job.id}`,
               description: `nitpickr ${error.failureClass.replace(/_/g, " ")}.`,
               summary: error.message,
-              retryable: error.retryable,
+              // "Retry scheduled" only while attempts remain.
+              retryable: error.retryable && job.attempts + 1 < job.maxAttempts,
               ...(checkRunId ? { checkRunId } : {}),
             }),
         );
