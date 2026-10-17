@@ -228,6 +228,8 @@ export class GitHubWebhookService implements GitHubWebhookHandler {
       this.#statusPublisher === null ||
       !this.#queueScheduler.attachCheckRun ||
       job.status !== "queued" ||
+      // A redelivered webhook finds the job it created already tracked.
+      typeof job.payload.checkRunId === "string" ||
       (deliveryId !== undefined && job.payload.correlationId !== deliveryId)
     ) {
       return;
