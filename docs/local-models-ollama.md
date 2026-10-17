@@ -25,15 +25,16 @@ Only the **worker** talks to the model server; the API only enqueues jobs.
 NITPICKR_MODEL_BASE_URL=http://host.docker.internal:11434/v1  # worker in Docker → host Ollama
 # NITPICKR_MODEL_BASE_URL=http://localhost:11434/v1           # worker running natively (default)
 # NITPICKR_MODEL_API_KEY=                                     # only for servers that need a bearer token
-NITPICKR_REVIEW_MODEL=qwen3.6:35b-a3b-coding-nvfp4            # required; a coding-tuned model is best
+NITPICKR_REVIEW_MODEL=qwen3.8:27b-nvfp4                       # required; also runs the verifier
 NITPICKR_MODEL_REASONING_EFFORT=none                          # thinking models: none|low|medium|high
 # NITPICKR_MEMORY_MODEL=                                      # classifier; defaults to the review model
 # NITPICKR_EMBEDDING_MODEL=nomic-ai/nomic-embed-text-v1.5     # in-process; or "off"
 # NITPICKR_EMBEDDING_DIMENSIONS=768                           # nomic-embed-text-v1.5 = 768 (default)
-NITPICKR_MODEL_REQUEST_TIMEOUT_MS=1800000                     # 30 min; local prefill is slow
+NITPICKR_MODEL_REQUEST_TIMEOUT_MS=600000                      # 10 min; output is capped at 6k tokens
 NITPICKR_MODEL_MAX_CONCURRENT_REQUESTS=1               # Ollama serves one request at a time
 NITPICKR_REVIEW_CHUNK_MAX_TOTAL_CHARS=160000           # ≈40k tokens per chunk
 NITPICKR_JOB_STALE_AFTER_MS=3600000                    # must exceed your slowest review
+# NITPICKR_INLINE_POLICY=confirmed                     # default: only verifier-confirmed findings go inline; the rest are listed in the summary
 NITPICKR_WORKER_CONCURRENCY=1
 ```
 
@@ -126,7 +127,7 @@ findings against hand-annotated expectations:
 ```bash
 # fixtures live in tests/fixtures/review-evals/live/*.json
 NITPICKR_MODEL_BASE_URL=http://localhost:11434/v1 \
-  pnpm eval:reviews --live --model qwen3.6:35b-a3b-coding-nvfp4 --reasoning-effort none \
+  pnpm eval:reviews --live --model qwen3.8:27b-nvfp4 --reasoning-effort none \
   --out reports/qwen36-coding-none.json
 
 # other flags: --base-url, --api-key, --fixtures <dir>, --filter <substring>, --timeout-ms

@@ -306,7 +306,7 @@ function parseModelSettings(parsed: BootstrapEnvironment): ModelSettings {
       "NITPICKR_REVIEW_CHUNK_MAX_TOTAL_CHARS",
       DEFAULT_REVIEW_CHUNK_MAX_TOTAL_CHARS,
     ),
-    inlinePolicy: parsed.NITPICKR_INLINE_POLICY ?? "all",
+    inlinePolicy: parsed.NITPICKR_INLINE_POLICY ?? "confirmed",
     verifierMaxFindings:
       parsed.NITPICKR_VERIFIER_MAX_FINDINGS?.trim().toLowerCase() === "off"
         ? null
