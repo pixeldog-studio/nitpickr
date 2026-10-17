@@ -317,3 +317,29 @@ describe("ChatReviewModel", () => {
     });
   });
 });
+
+describe("ChatCompletionClient text mode", () => {
+  it("omits response_format for prose replies", async () => {
+    const { ChatCompletionClient } = await import(
+      "../../src/shared/chat-completion-client.js"
+    );
+    let body: Record<string, unknown> = {};
+    const client = new ChatCompletionClient(
+      { model: "m", baseUrl: "http://stub/v1" },
+      async (_input, init) => {
+        body = JSON.parse(String(init?.body ?? "{}"));
+        return new Response(
+          JSON.stringify({ choices: [{ message: { content: "plain" } }] }),
+          { status: 200 },
+        );
+      },
+    );
+    await client.complete({
+      messages: [{ role: "user", content: "hi" }],
+      responseFormat: "text",
+      maxOutputTokens: 800,
+    });
+    expect(body).not.toHaveProperty("response_format");
+    expect(body.max_tokens).toBe(800);
+  });
+});

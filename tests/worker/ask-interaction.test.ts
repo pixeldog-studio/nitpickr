@@ -125,3 +125,123 @@ describe("ask interactions", () => {
     ]);
   });
 });
+
+describe("interaction reply failures and guards", () => {
+  const baseDeps = (job: QueueJob, extra: Record<string, unknown>) => ({
+    logger: noopLogger,
+    instructionBundleLoader: {
+      async loadForReview() {
+        return { config: {} as never, documents: [], combinedText: "" };
+      },
+    },
+    memoryService: {
+      async getRelevantMemories() {
+        return [];
+      },
+      async ingestDiscussion() {
+        return { acknowledgments: [], savedEntries: [] };
+      },
+    },
+    reviewPlanner: { plan: () => ({}) as never },
+    reviewLifecycle: {
+      startReview: async () => "run",
+      completeReview: async () => {},
+      failReview: async () => {},
+    },
+    reviewEngine: { review: async () => ({}) as never },
+    publisher: {
+      buildInlineComments: () => [],
+      publish: async () => ({ reviewId: "r" }),
+    },
+    conversationResponder: {
+      answer: async () => "answer",
+      reconsider: async () => ({ body: "", resolve: false, verdict: "x" }),
+    },
+    ...extra,
+    queueScheduler: {
+      claimNextJobs: async () => [job],
+      cancelSupersededReviewJobs: async () => 0,
+      completeJob: async () => ({ ...job, status: "completed" }),
+      ...(extra.queueScheduler as object),
+    },
+  });
+  const context = (job: QueueJob) => ({
+    tenantId: job.tenantId,
+    installationId: "1",
+    repositoryId: job.repositoryId,
+    repository: { owner: "rubenspessoa", name: "nitpickr" },
+    changeRequest: {
+      id: "github:99:42",
+      tenantId: job.tenantId,
+      installationId: "1",
+      repositoryId: job.repositoryId,
+      provider: "github" as const,
+      number: 42,
+      title: "t",
+      baseSha: "a".repeat(40),
+      headSha: "b".repeat(40),
+      status: "open" as const,
+      authorLogin: "ruben",
+    },
+    files: [],
+    comments: [],
+  });
+
+  it("retries the job when posting the reply hits a GitHub 5xx", async () => {
+    const job = askJob();
+    const failures: Array<{ retryable?: boolean }> = [];
+    const runner = new WorkerRunner(
+      baseDeps(job, {
+        queueScheduler: {
+          failJob: async (
+            _id: string,
+            _error: string,
+            options: { retryable?: boolean },
+          ) => {
+            failures.push(options);
+            return { ...job, status: "queued" };
+          },
+        },
+        githubAdapter: {
+          fetchChangeRequestContext: async () => context(job),
+          async createIssueComment() {
+            throw new Error("GitHub API request failed with status 502");
+          },
+        },
+      }) as never,
+    );
+    await runner.runOnce({ workerId: "worker_1", perTenantCap: 1 });
+    expect(failures).toEqual([{ retryable: true }]);
+  });
+
+  it("stays out of human threads unless nitpickr is mentioned", async () => {
+    const job = askJob();
+    job.payload = {
+      ...(job.payload as object),
+      command: "fix",
+      replyTargetCommentId: 777,
+      source: {
+        kind: "review_comment",
+        commentId: 5002,
+        body: "fix",
+        argumentText: "",
+      },
+    };
+    const posted: string[] = [];
+    const runner = new WorkerRunner(
+      baseDeps(job, {
+        botLogin: "nitpickrai",
+        queueScheduler: { failJob: async () => ({ ...job, status: "failed" }) },
+        githubAdapter: {
+          fetchChangeRequestContext: async () => context(job),
+          listNitpickrReviewThreads: async () => [],
+          async replyToReviewComment(input: { body: string }) {
+            posted.push(input.body);
+          },
+        },
+      }) as never,
+    );
+    await runner.runOnce({ workerId: "worker_1", perTenantCap: 1 });
+    expect(posted).toEqual([]);
+  });
+});

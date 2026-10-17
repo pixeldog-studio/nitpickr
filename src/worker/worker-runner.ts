@@ -97,6 +97,12 @@ function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown worker error.";
 }
 
+/** Whether a comment @-mentions the bot (with or without the [bot] suffix). */
+function mentionsBot(body: string, botLogin: string): boolean {
+  const login = botLogin.replace(/\[bot\]$/i, "").toLowerCase();
+  return body.toLowerCase().includes(`@${login}`);
+}
+
 function classifyReviewError(
   stage: "config" | "github" | "review" | "publish",
   error: unknown,
@@ -957,6 +963,7 @@ export class WorkerRunner {
   readonly #feedbackService: WorkerRunnerDependencies["feedbackService"];
   readonly #reviewPlanner: WorkerRunnerDependencies["reviewPlanner"];
   readonly #reviewerChatService: Pick<ReviewerChatService, "respond">;
+  readonly #botLogin: string;
   readonly #conversationResponder: Pick<
     ConversationResponder,
     "answer" | "reconsider"
@@ -989,6 +996,7 @@ export class WorkerRunner {
         input.botLogin ? { botLogin: input.botLogin } : {},
       );
     this.#conversationResponder = input.conversationResponder ?? null;
+    this.#botLogin = input.botLogin ?? "nitpickr";
     this.#reviewLifecycle = input.reviewLifecycle;
     this.#reviewEngine = input.reviewEngine;
     this.#publisher = input.publisher;
@@ -1880,10 +1888,10 @@ export class WorkerRunner {
     if (
       payload.source.kind === "review_comment" &&
       referencedThread === null &&
-      payload.command === "ask"
+      !mentionsBot(payload.source.body, this.#botLogin)
     ) {
       // Replies in threads nitpickr did not start are people talking to
-      // each other.
+      // each other, whatever words they use, unless they mention nitpickr.
       logger.info("Ignoring reply in a thread nitpickr did not start.", {
         jobId: job.id,
         replyTargetCommentId: payload.replyTargetCommentId,
@@ -1914,6 +1922,56 @@ export class WorkerRunner {
 
     // Post first: if posting fails the job retries, and recording feedback
     // or memory before that would count it twice.
+    try {
+      await this.#postInteractionReply(payload, reply.body);
+    } catch (error) {
+      const message = toErrorMessage(error);
+      // 5xx, rate limits and dropped connections are worth another try;
+      // a 4xx (deleted comment, no permission) is not.
+      throw new ReviewJobError(
+        "github_api",
+        isRetryableHttpError(message) ||
+          /fetch failed|ECONNRESET|ETIMEDOUT|socket hang up/i.test(message),
+        message,
+      );
+    }
+
+    // The reply is already posted, so a bookkeeping failure must not fail
+    // (and retry) the job: that would post the reply again.
+    try {
+      if (reply.memoryDiscussions.length > 0) {
+        await this.#memoryService.ingestDiscussion({
+          tenantId: job.tenantId,
+          repositoryId: job.repositoryId,
+          discussions: reply.memoryDiscussions,
+        });
+      }
+      if (this.#feedbackService && reply.feedbackEvents.length > 0) {
+        await this.#feedbackService.recordOutcome({
+          tenantId: job.tenantId,
+          repositoryId: job.repositoryId,
+          events: reply.feedbackEvents,
+        });
+      }
+    } catch (error) {
+      logger.warn("Failed to record feedback for an interaction reply.", {
+        jobId: job.id,
+        error: toErrorMessage(error),
+      });
+    }
+
+    logger.info("Processed reviewer interaction job.", {
+      jobId: job.id,
+      repositoryId: job.repositoryId,
+      command: payload.command,
+      sourceKind: payload.source.kind,
+    });
+  }
+
+  async #postInteractionReply(
+    payload: ReturnType<typeof parseInteractionJobPayload>,
+    body: string,
+  ): Promise<void> {
     if (payload.source.kind === "issue_comment") {
       if (!this.#githubAdapter.createIssueComment) {
         throw new Error("GitHub issue comment replies are unavailable.");
@@ -1922,7 +1980,7 @@ export class WorkerRunner {
         installationId: payload.installationId,
         repository: payload.repository,
         pullNumber: payload.pullNumber,
-        body: reply.body,
+        body,
       });
     } else {
       if (!this.#githubAdapter.replyToReviewComment) {
@@ -1933,31 +1991,9 @@ export class WorkerRunner {
         repository: payload.repository,
         pullNumber: payload.pullNumber,
         commentId: payload.replyTargetCommentId ?? payload.source.commentId,
-        body: reply.body,
+        body,
       });
     }
-
-    if (reply.memoryDiscussions.length > 0) {
-      await this.#memoryService.ingestDiscussion({
-        tenantId: job.tenantId,
-        repositoryId: job.repositoryId,
-        discussions: reply.memoryDiscussions,
-      });
-    }
-    if (this.#feedbackService && reply.feedbackEvents.length > 0) {
-      await this.#feedbackService.recordOutcome({
-        tenantId: job.tenantId,
-        repositoryId: job.repositoryId,
-        events: reply.feedbackEvents,
-      });
-    }
-
-    logger.info("Processed reviewer interaction job.", {
-      jobId: job.id,
-      repositoryId: job.repositoryId,
-      command: payload.command,
-      sourceKind: payload.source.kind,
-    });
   }
 
   /**

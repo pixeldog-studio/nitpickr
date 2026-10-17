@@ -366,6 +366,7 @@ describe("GitHubAdapter", () => {
           login: "maintainer",
         },
       },
+      changes: { body: { from: "looks good" } },
     });
 
     expect(event.kind).toBe("review_requested");
@@ -380,6 +381,42 @@ describe("GitHubAdapter", () => {
 
     expect(event.trigger.command).toBe("review");
     expect(event.mode).toBe("quick");
+  });
+
+  it("ignores an edit to a comment that already had the command", () => {
+    const adapter = new GitHubAdapter({
+      apiClient: new FakeGitHubApiClient(),
+      appConfig: {
+        appId: 123456,
+        privateKey: "test",
+        webhookSecret: "super-secret",
+        webhookUrl: "https://nitpickr.example.com/webhooks/github",
+        botLogins: ["nitpickr", "getnitpickr"],
+      },
+    });
+    const event = adapter.normalizeWebhookEvent("issue_comment", {
+      action: "edited",
+      installation: { id: 123456 },
+      repository: {
+        id: 99,
+        name: "nitpickr",
+        owner: { login: "rubenspessoa" },
+        default_branch: "main",
+      },
+      issue: {
+        number: 42,
+        pull_request: {
+          url: "https://api.github.com/repos/rubenspessoa/nitpickr/pulls/42",
+        },
+      },
+      comment: {
+        id: 5002,
+        body: "@nitpickr review please",
+        user: { login: "maintainer" },
+      },
+      changes: { body: { from: "@nitpickr review plz" } },
+    });
+    expect(event.kind).toBe("ignored");
   });
 
   it("accepts flexible manual command formatting", () => {

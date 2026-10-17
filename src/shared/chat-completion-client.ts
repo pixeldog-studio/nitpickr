@@ -85,6 +85,10 @@ export class ChatCompletionClient {
     messages: ChatMessage[];
     temperature?: number;
     jsonSchema?: ResponseJsonSchema | null;
+    /** "text" sends no response_format, for prose replies. */
+    responseFormat?: "json" | "text";
+    /** Overrides the client's output cap for this call. */
+    maxOutputTokens?: number;
   }): Promise<{ content: string; usage: ChatUsage | undefined }> {
     const startedAt = process.hrtime.bigint();
     const elapsedMs = () =>
@@ -106,23 +110,30 @@ export class ChatCompletionClient {
           : {}),
         body: JSON.stringify({
           model: this.#config.model,
-          max_tokens: this.#config.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+          max_tokens:
+            input.maxOutputTokens ??
+            this.#config.maxOutputTokens ??
+            DEFAULT_MAX_OUTPUT_TOKENS,
           ...(input.temperature !== undefined
             ? { temperature: input.temperature }
             : {}),
           ...(this.#config.reasoningEffort
             ? { reasoning_effort: this.#config.reasoningEffort }
             : {}),
-          response_format: input.jsonSchema
-            ? {
-                type: "json_schema",
-                json_schema: {
-                  name: input.jsonSchema.name,
-                  strict: true,
-                  schema: input.jsonSchema.schema,
-                },
-              }
-            : { type: "json_object" },
+          ...(input.responseFormat === "text"
+            ? {}
+            : {
+                response_format: input.jsonSchema
+                  ? {
+                      type: "json_schema",
+                      json_schema: {
+                        name: input.jsonSchema.name,
+                        strict: true,
+                        schema: input.jsonSchema.schema,
+                      },
+                    }
+                  : { type: "json_object" },
+              }),
           messages: input.messages,
         }),
       });

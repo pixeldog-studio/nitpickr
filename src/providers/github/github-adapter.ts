@@ -65,6 +65,10 @@ const issueCommentEventSchema = z.object({
     }),
     author_association: z.string().optional(),
   }),
+  /** On `edited`: the body before the edit. */
+  changes: z
+    .object({ body: z.object({ from: z.string() }).optional() })
+    .optional(),
 });
 
 const pullRequestReviewCommentEventSchema = z.object({
@@ -665,11 +669,24 @@ export class GitHubAdapter {
             "Only repository owners, members and collaborators can use nitpickr commands.",
         };
       }
-      const command = parseManualCommand(
-        parsed.comment.body,
-        this.#botLogins,
-        parsed.comment.user.login,
-      );
+      // Edits re-send the webhook: an edit only counts when it adds the
+      // command, so fixing a typo in "@nitpickr review" doesn't re-run it.
+      const previousBody = parsed.changes?.body?.from;
+      const commandWasThere =
+        parsed.action === "edited" &&
+        (previousBody === undefined ||
+          parseManualCommand(
+            previousBody,
+            this.#botLogins,
+            parsed.comment.user.login,
+          ) !== null);
+      const command = commandWasThere
+        ? null
+        : parseManualCommand(
+            parsed.comment.body,
+            this.#botLogins,
+            parsed.comment.user.login,
+          );
       if (command) {
         return {
           kind: "review_requested",
