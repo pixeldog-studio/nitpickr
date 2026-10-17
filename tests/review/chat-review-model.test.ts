@@ -48,6 +48,33 @@ describe("ChatReviewModel", () => {
     });
   });
 
+  it("caps output tokens and fails fast on a truncated reply", async () => {
+    let requestedBody = "";
+    const model = new ChatReviewModel(
+      { model: "m", baseUrl: "http://stub/v1" },
+      async (_input, init) => {
+        requestedBody = String(init?.body ?? "");
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: { content: '{"summary": "loop loop' },
+                finish_reason: "length",
+              },
+            ],
+            usage: { completion_tokens: 6000 },
+          }),
+          { status: 200 },
+        );
+      },
+    );
+
+    await expect(
+      model.generateStructuredReview({ system: "s", user: "u" }),
+    ).rejects.toThrow(/token cap/);
+    expect(JSON.parse(requestedBody).max_tokens).toBe(6000);
+  });
+
   it("normalizes custom base URLs without duplicating the version prefix", async () => {
     let requestedUrl = "";
     const model = new ChatReviewModel(
