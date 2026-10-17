@@ -106,6 +106,18 @@ function mentionsBot(body: string, botLogin: string): boolean {
 /** A failure in plain words for the PR, without stack traces or bodies. */
 export function describeReviewFailure(error: unknown): string {
   const message = toErrorMessage(error);
+  // Who failed comes first: a GitHub timeout is not a slow model.
+  const failureClass =
+    error instanceof ReviewJobError ? error.failureClass : null;
+  if (failureClass === "github_api") {
+    return "a GitHub API request failed";
+  }
+  if (failureClass === "config_setup") {
+    return "nitpickr's setup is incomplete";
+  }
+  if (failureClass === "publish_failure") {
+    return "posting the review to GitHub failed";
+  }
   if (/timed out|TimeoutError|aborted due to timeout/i.test(message)) {
     return "the local model took longer than the request limit on part of this PR";
   }
@@ -114,15 +126,6 @@ export function describeReviewFailure(error: unknown): string {
   }
   if (/fetch failed|ECONNREFUSED|ECONNRESET|socket hang up/i.test(message)) {
     return "the local model server wasn't reachable";
-  }
-  if (error instanceof ReviewJobError && error.failureClass === "github_api") {
-    return "a GitHub API request failed";
-  }
-  if (
-    error instanceof ReviewJobError &&
-    error.failureClass === "config_setup"
-  ) {
-    return "nitpickr's setup is incomplete";
   }
   return "an unexpected error stopped it";
 }
@@ -1271,7 +1274,7 @@ export class WorkerRunner {
         pullNumber: payload.pullNumber,
         body: `**nitpickr** couldn't finish ${
           sha ? `reviewing \`${sha}\`` : "this review"
-        }: ${reason}. Comment \`@${this.#botLogin} review\` to try again.`,
+        }: ${reason}. Comment \`@${this.#botLogin.replace(/\[bot\]$/i, "")} review\` to try again.`,
       });
     } catch (error) {
       logger.warn("Failed to announce a failed review.", {
@@ -2242,15 +2245,23 @@ export class WorkerRunner {
             threadId: referencedThread?.threadId ?? null,
             logger,
           });
-    const reply =
-      modelReply ??
-      (await this.#reviewerChatService.respond({
+    const templateReply = async () =>
+      this.#reviewerChatService.respond({
         command: payload.command,
         actorLogin: payload.actorLogin,
         argumentText: payload.source.argumentText,
         latestReview,
         thread: threadContext,
-      }));
+      });
+    const reply =
+      modelReply === null
+        ? await templateReply()
+        : "fallbackNote" in modelReply
+          ? await templateReply().then((template) => ({
+              ...template,
+              body: `${template.body}\n\n_(${modelReply.fallbackNote})_`,
+            }))
+          : modelReply;
 
     // Post first: if posting fails the job retries, and recording feedback
     // or memory before that would count it twice.
@@ -2340,7 +2351,7 @@ export class WorkerRunner {
     thread: (ConversationThread & { fingerprint: string }) | null;
     threadId: string | null;
     logger: Logger;
-  }): Promise<ReviewerChatReply | null> {
+  }): Promise<ReviewerChatReply | { fallbackNote: string } | null> {
     const { job, payload, responder, thread, logger } = input;
     const command = payload.command;
     if (
@@ -2475,10 +2486,16 @@ export class WorkerRunner {
         command,
         error: toErrorMessage(error),
       });
+      const reason = describeReviewFailure(error);
+      // why/teach have a useful answer without the model: the finding's own
+      // explanation. Give it, and say the model couldn't add more.
+      if ((command === "why" || command === "teach") && thread !== null) {
+        return { fallbackNote: `I couldn't add more just now: ${reason}.` };
+      }
       // Say what happened instead of a template that pretends the command
       // isn't supported.
       return {
-        body: `I couldn't answer that just now: ${describeReviewFailure(error)}. Ask again in a few minutes.`,
+        body: `I couldn't answer that just now: ${reason}. Ask again in a few minutes.`,
         feedbackEvents: [],
         memoryDiscussions: [],
       };

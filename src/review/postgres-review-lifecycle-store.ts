@@ -15,6 +15,17 @@ export interface PostgresReviewLifecycleClient {
   ): Promise<T[]>;
 }
 
+/**
+ * Runs whose review reached the PR. A new run marks every earlier one
+ * "superseded" when it starts, so a superseded run counts if it published;
+ * failed and never-finished runs never count (a failed run must not make
+ * its commit look reviewed, or become the base of the next delta review).
+ */
+const REACHED_THE_PR = `(
+  status in ('published', 'skipped')
+  or (status = 'superseded' and published_review_id is not null)
+)`;
+
 export class PostgresReviewLifecycleStore implements ReviewLifecycleStore {
   readonly #client: PostgresReviewLifecycleClient;
 
@@ -141,10 +152,8 @@ export class PostgresReviewLifecycleStore implements ReviewLifecycleStore {
           completed_at
         from review_runs
         where change_request_id = $1
-          -- Only reviews that reached the PR: a failed run must not make
-          -- its commit look reviewed (or become the next delta's base).
-          and status in ('published', 'skipped')
-        order by completed_at desc
+          and ${REACHED_THE_PR}
+        order by completed_at desc nulls last
         limit 1
       `,
       [changeRequestId],
@@ -181,7 +190,7 @@ export class PostgresReviewLifecycleStore implements ReviewLifecycleStore {
         select count(*)::bigint as count
         from review_runs
         where change_request_id = $1
-          and status in ('published', 'skipped')
+          and ${REACHED_THE_PR}
       `,
       [changeRequestId],
     );

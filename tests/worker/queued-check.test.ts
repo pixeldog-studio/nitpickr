@@ -177,3 +177,21 @@ describe("queued review check", () => {
     ]);
   });
 });
+
+describe("describeReviewFailure", () => {
+  it("names who failed before guessing from the message", async () => {
+    const { describeReviewFailure } = await import(
+      "../../src/worker/worker-runner.js"
+    );
+    expect(
+      describeReviewFailure(
+        new Error("Model request timed out after 600000ms."),
+      ),
+    ).toBe(
+      "the local model took longer than the request limit on part of this PR",
+    );
+    expect(describeReviewFailure(new Error("boom"))).toBe(
+      "an unexpected error stopped it",
+    );
+  });
+});

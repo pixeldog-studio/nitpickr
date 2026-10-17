@@ -207,6 +207,10 @@ describe("PostgresReviewLifecycleStore", () => {
     expect(client.calls[0]?.query).toContain(
       "status in ('published', 'skipped')",
     );
+    // A new run supersedes earlier ones when it starts; those still count.
+    expect(client.calls[0]?.query).toContain(
+      "status = 'superseded' and published_review_id is not null",
+    );
     expect(client.calls[0]?.query).toContain("completed_at desc");
   });
 
@@ -228,6 +232,10 @@ describe("PostgresReviewLifecycleStore", () => {
     expect(client.calls[0]?.query).toContain("select count(*)");
     expect(client.calls[0]?.query).toContain(
       "status in ('published', 'skipped')",
+    );
+    // A new run supersedes earlier ones when it starts; those still count.
+    expect(client.calls[0]?.query).toContain(
+      "status = 'superseded' and published_review_id is not null",
     );
     expect(client.calls[0]?.params).toEqual(["github:99:42"]);
   });
