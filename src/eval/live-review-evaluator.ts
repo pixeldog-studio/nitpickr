@@ -158,7 +158,13 @@ export interface LiveCaseReport {
   /** Expectations matched by inline or second-look findings. */
   matchedIncludingSecondLook?: number;
   secondLook?: Array<
-    Pick<ReviewFinding, "path" | "line" | "severity" | "category" | "title">
+    Pick<ReviewFinding, "path" | "line" | "severity" | "category" | "title"> &
+      Partial<
+        Pick<
+          ReviewFinding,
+          "findingType" | "body" | "fixPrompt" | "verification"
+        >
+      >
   >;
   durationMs: number;
   modelCalls: number;
@@ -512,7 +518,13 @@ export class LiveReviewEvaluator {
           line: finding.line,
           severity: finding.severity,
           category: finding.category,
+          findingType: finding.findingType,
           title: finding.title,
+          body: finding.body,
+          fixPrompt: finding.fixPrompt,
+          ...(finding.verification
+            ? { verification: finding.verification }
+            : {}),
         })),
         verdictsCorrect: fixture.expectedVerdicts.filter(
           (entry) => verdicts.get(entry.threadId) === entry.verdict,
