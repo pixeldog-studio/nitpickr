@@ -41,7 +41,6 @@
       "Bash(git push origin main:*)",
       "Bash(git push origin develop:*)",
       "Bash(git push origin master:*)",
-      "Bash(gh pr merge:*)",
       "Bash(linear auth token:*)"
     ]
   },
@@ -52,11 +51,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hq/worktree-guard.mjs\""
+            "command": "f=\"$HOME/Developer/hq/hooks/worktree-guard.mjs\"; [ -f \"$f\" ] || { echo \"[hq] guard missing: $f (clone ~/Developer/hq on develop)\" >&2; exit 2; }; (cd \"$HOME/Developer/hq\" && node \"$f\") || { echo \"[hq] guard failed to run or denied: worktree-guard\" >&2; exit 2; }"
           },
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hq/config-protection.mjs\""
+            "command": "f=\"$HOME/Developer/hq/hooks/config-protection.mjs\"; [ -f \"$f\" ] || { echo \"[hq] guard missing: $f (clone ~/Developer/hq on develop)\" >&2; exit 2; }; (cd \"$HOME/Developer/hq\" && node \"$f\") || { echo \"[hq] guard failed to run or denied: config-protection\" >&2; exit 2; }"
           }
         ]
       },
@@ -65,7 +64,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hq/git-guard.mjs\""
+            "command": "f=\"$HOME/Developer/hq/hooks/git-guard.mjs\"; [ -f \"$f\" ] || { echo \"[hq] guard missing: $f (clone ~/Developer/hq on develop)\" >&2; exit 2; }; (cd \"$HOME/Developer/hq\" && node \"$f\") || { echo \"[hq] guard failed to run or denied: git-guard\" >&2; exit 2; }"
           }
         ]
       }
@@ -87,7 +86,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hq/stop-verify.mjs\"",
+            "command": "node \"$HOME/Developer/hq/hooks/stop-verify.mjs\"",
             "timeout": 300
           }
         ]
