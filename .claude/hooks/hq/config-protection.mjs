@@ -14,7 +14,8 @@ const PATTERNS = [
 ];
 
 // The guard rails themselves: an agent must not be able to edit its own hooks or permissions.
-const GUARD_PATHS = [/\/\.claude\/hooks\//, /\/\.claude\/settings(\.local)?\.json$/, /\/harness\/lane-settings\.json$/];
+// Case-insensitive: APFS is case-insensitive by default, so .CLAUDE/hooks is the same directory.
+const GUARD_PATHS = [/\/\.claude\/hooks\//i, /\/\.claude\/settings(\.local)?\.json$/i, /\/harness\/lane-settings\.json$/i];
 
 export function isProtectedConfig(path) {
   return PATTERNS.some((re) => re.test(basename(path))) || GUARD_PATHS.some((re) => re.test(path));

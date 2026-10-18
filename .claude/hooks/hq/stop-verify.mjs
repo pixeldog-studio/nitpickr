@@ -23,7 +23,8 @@ const counterFile = join(gitDir || join(root, '.git'), 'hq-stop-verify-count');
 let count = 0;
 try { count = Number(readFileSync(counterFile, 'utf8')) || 0; } catch { /* first run */ }
 const res = spawnSync('sh', ['-c', cmd], { cwd: root, encoding: 'utf8', timeout: 240000 });
-if (res.status === 0 || res.status === 127) { // 127 = command not found: misconfiguration, don't wedge the session
+if (res.status === 127) process.stderr.write(`[stop-verify] \`${cmd}\` exited 127 (command not found): HQ_FAST_VERIFY is misconfigured or a tool is missing; not blocking.\n`);
+if (res.status === 0 || res.status === 127) { // 127: misconfiguration, don't wedge the session
   try { writeFileSync(counterFile, '0'); } catch { /* no .hq dir */ }
   process.exit(0);
 }
