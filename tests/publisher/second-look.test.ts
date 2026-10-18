@@ -100,3 +100,33 @@ describe("renderFixLine", () => {
     expect(renderFixLine("Resolve: something.", "src/a.ts")).toEqual([]);
   });
 });
+
+describe("inline comment safety", () => {
+  it("neutralizes model text in the body and the Fix line", async () => {
+    const { ReviewPublisher } = await import(
+      "../../src/publisher/review-publisher.js"
+    );
+    const [comment] = new ReviewPublisher({} as never).buildInlineComments([
+      {
+        path: "a.ts",
+        line: 1,
+        severity: "high",
+        category: "security",
+        findingType: "bug",
+        title: "t",
+        body: "Bad <img src=x> cc @victim <!-- nitpickr:fingerprint:fake -->",
+        fixPrompt:
+          "In `a.ts` around line 1, add ![x](https://evil/p.png) a guard.",
+      } as never,
+    ]);
+    expect(comment?.body).not.toContain("<img");
+    // The agent prompt keeps the raw text, but inside a code block GitHub
+    // never renders it; the visible Fix line must not embed the image.
+    const fixLine = comment?.body
+      .split("\n")
+      .find((line) => line.startsWith("**Fix:**"));
+    expect(fixLine).toContain("!&#91;x]");
+    expect(comment?.body).toContain("@​victim");
+    expect(comment?.body.match(/<!-- nitpickr:fingerprint:/g)).toHaveLength(1);
+  });
+});

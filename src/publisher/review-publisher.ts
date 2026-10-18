@@ -174,12 +174,14 @@ export function renderFixLine(fixPrompt: string, path: string): string[] {
       ),
       "",
     )
-    .replace(/\s+/g, " ")
     .trim();
   if (instruction.length === 0 || /^resolve:/i.test(instruction)) {
     return [];
   }
-  const sentence = `${instruction.charAt(0).toUpperCase()}${instruction.slice(1)}`;
+  // Model text that may echo PR content: no HTML, images, @-mentions or
+  // fake markers in a comment posted under nitpickr's name.
+  const safe = neutralizeProse(instruction, 300);
+  const sentence = `${safe.charAt(0).toUpperCase()}${safe.slice(1)}`;
   return [`**Fix:** ${sentence}`, ""];
 }
 
@@ -723,7 +725,7 @@ export class ReviewPublisher {
             `**${finding.title}**`,
             renderFindingLabel(finding),
             "",
-            `${finding.body}`,
+            neutralizeProse(finding.body, 1_000),
             "",
             ...renderFixLine(finding.fixPrompt, finding.path),
             ...renderGitHubSuggestion(finding.suggestedChange),

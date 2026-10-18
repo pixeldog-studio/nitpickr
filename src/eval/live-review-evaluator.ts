@@ -691,7 +691,7 @@ export function summarizeLearningPairs(
     );
     const changed =
       control.error === null &&
-      applied.error === null &&
+      casePassed(applied) &&
       (control.matchedIncludingSecondLook ?? control.matched.length) > 0 &&
       !stillRaised;
     return [
