@@ -13,7 +13,8 @@
     "build": "tsc -p tsconfig.json",
     "site:build": "node scripts/build-site.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "biome check .",
+    "lint": "biome ci .",
+    "format:check": "biome format .",
     "test": "vitest run",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm site:build",
     "test:watch": "vitest",
@@ -35,7 +36,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.15",
+    "@biomejs/biome": "2.5.15",
     "@types/node": "^24.19.1",
     "tsx": "^4.23.15",
     "typescript": "^5.9",
