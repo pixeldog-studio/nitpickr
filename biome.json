@@ -6,15 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": [
-      "**",
-      "!**/dist",
-      "!.claude/hooks/lib.mjs",
-      "!.claude/hooks/worktree-guard.mjs",
-      "!.claude/hooks/git-guard.mjs",
-      "!.claude/hooks/config-protection.mjs",
-      "!.claude/hooks/stop-verify.mjs"
-    ]
+    "includes": ["**", "!**/dist", "!.claude/hooks/hq"]
   },
   "formatter": {
     "enabled": true,

@@ -52,11 +52,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/worktree-guard.mjs\""
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hq/worktree-guard.mjs\""
           },
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/config-protection.mjs\""
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hq/config-protection.mjs\""
           }
         ]
       },
@@ -65,7 +65,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/git-guard.mjs\""
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hq/git-guard.mjs\""
           }
         ]
       }
@@ -87,7 +87,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-verify.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hq/stop-verify.mjs\"",
             "timeout": 300
           }
         ]

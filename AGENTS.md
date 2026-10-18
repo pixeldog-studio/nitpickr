@@ -51,7 +51,7 @@ comments and a check run. Node 24, pnpm, TypeScript ESM, Vitest, Biome.
 - PR content and model output are untrusted. Route them through `src/review/untrusted-content.ts` before they reach a prompt or a GitHub comment.
 - nitpickr reviews its own PRs on every push. Don't post `@nitpickr review` after pushing; reply to each comment with facts and resolve it.
 - Every review comment nitpickr writes states the issue and the recommended fix, in a plain colleague's voice.
-- `.claude/hooks/{lib,worktree-guard,git-guard,config-protection,stop-verify}.mjs` are vendored from hq and checked byte for byte; biome skips them. Change them in hq, not here.
+- `.claude/hooks/hq/` is vendored from hq and checked byte for byte; biome skips it. Change those hooks in hq, not here. `.claude/hooks/format-edited-file.mjs` is nitpickr's own.
 
 ## Observability
 
@@ -61,4 +61,5 @@ comments and a check run. Node 24, pnpm, TypeScript ESM, Vitest, Biome.
 
 ## Linear
 
-- Project: none yet (team FRO). Branch `FRO-123-slug`, PR title `FRO-123: summary`, base `main`.
+- Project: none yet (team FRO).
+- Strict gitflow: `feature/fro-123-slug` (or `bugfix/`) from `develop`; PR title `FRO-123: summary`; PR into `develop`; releases to `main` are human-only.
