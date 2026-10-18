@@ -13,8 +13,11 @@ const PATTERNS = [
   /^ruff\.toml$/, /^\.ruff\.toml$/, /^mypy\.ini$/, /^\.markdownlint(\..+)?$/,
 ];
 
+// The guard rails themselves: an agent must not be able to edit its own hooks or permissions.
+const GUARD_PATHS = [/\/\.claude\/hooks\//, /\/\.claude\/settings(\.local)?\.json$/, /\/harness\/lane-settings\.json$/];
+
 export function isProtectedConfig(path) {
-  return PATTERNS.some((re) => re.test(basename(path)));
+  return PATTERNS.some((re) => re.test(basename(path))) || GUARD_PATHS.some((re) => re.test(path));
 }
 
 const input = await readInput();
@@ -22,7 +25,7 @@ if (!input || process.env.HQ_ALLOW_CONFIG_EDIT === '1') process.exit(0);
 const file = input.tool_input?.file_path;
 if (!file) process.exit(0);
 const abs = resolve(input.cwd || process.cwd(), file);
-if (isProtectedConfig(abs) && existsSync(abs)) {
+if (isProtectedConfig(abs) && (existsSync(abs) || GUARD_PATHS.some((re) => re.test(abs)))) {
   block('config-protection', `${basename(abs)} is a protected check config. Fix the code instead; if the config truly must change, ask the human.`);
 }
 process.exit(0);

@@ -9,7 +9,8 @@ import { readInput } from './lib.mjs';
 const MAX_BLOCKS = 3;
 const input = await readInput();
 const cmd = process.env.HQ_FAST_VERIFY;
-if (!input || !cmd) process.exit(0);
+// Unconfigured (missing or still the baseline placeholder): never block.
+if (!input || !cmd || /^REPLACE\b/.test(cmd)) process.exit(0);
 const cwd = input.cwd || process.cwd();
 const top = spawnSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' });
 if (top.status !== 0) process.exit(0);
@@ -22,7 +23,7 @@ const counterFile = join(gitDir || join(root, '.git'), 'hq-stop-verify-count');
 let count = 0;
 try { count = Number(readFileSync(counterFile, 'utf8')) || 0; } catch { /* first run */ }
 const res = spawnSync('sh', ['-c', cmd], { cwd: root, encoding: 'utf8', timeout: 240000 });
-if (res.status === 0) {
+if (res.status === 0 || res.status === 127) { // 127 = command not found: misconfiguration, don't wedge the session
   try { writeFileSync(counterFile, '0'); } catch { /* no .hq dir */ }
   process.exit(0);
 }

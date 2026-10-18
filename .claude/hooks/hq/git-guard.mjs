@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// PreToolUse(Bash): block hook bypass, force-push and pushes to protected branches.
-// Early warning only — server-side branch rulesets are the real boundary.
+// PreToolUse(Bash): block hook bypass, force-push, pushes to protected branches, and merges into
+// anything but develop (strict gitflow). Early warning only — server-side rules are the real boundary,
+// so this errs on the side of blocking.
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { readInput, block } from './lib.mjs';
@@ -12,20 +13,47 @@ export function stripQuoted(command) {
   return command.replace(/'[^']*'/g, "''").replace(/"(?:[^"\\]|\\.)*"/g, '""');
 }
 
-export function findViolation(command) {
-  const cmd = ` ${stripQuoted(command).replace(/\s+/g, ' ')} `;
-  if (/\bgit\b[^;&|]*\s--no-verify\b/.test(cmd)) return 'git --no-verify bypasses hooks';
-  if (/\bgit\b[^;&|]*\bcommit\b[^;&|]*\s-[a-zA-Z]*n[a-zA-Z]*\s/.test(cmd)) return 'git commit -n bypasses hooks';
-  if (/core\.hooksPath/.test(cmd)) return 'overriding core.hooksPath bypasses hooks';
+// Shell-unquote for refspec analysis: `"develop"`, `dev""elop` and `'HEAD:main'` all mean develop/main.
+export function unquote(command) {
+  return command.replace(/["'\\]/g, '');
+}
+
+export function normalizeRef(ref) {
+  return ref.replace(/^\+/, '').replace(/\/{2,}/g, '/').replace(/^refs\//, '').replace(/^heads\//, '').replace(/^remotes\/[^/]+\//, '');
+}
+
+// Returns the destination branch names a `git push` segment targets, or ['<implicit>'] when none is named.
+export function pushDestinations(segment) {
+  const tokens = segment.trim().split(/\s+/);
+  const args = tokens.slice(tokens.indexOf('push') + 1);
+  const positional = args.filter((t) => !t.startsWith('-'));
+  if (positional.length <= 1) return ['<implicit>'];
+  if (positional.slice(1).some((t) => t.startsWith(':'))) return ['<delete>'];
+  return positional.slice(1).map((t) => {
+    const dest = t.includes(':') ? t.split(':').pop() : t;
+    return dest === 'HEAD' || dest === '' ? '<implicit>' : normalizeRef(dest);
+  });
+}
+
+export function findViolation(command, currentBranch = () => null) {
+  const plain = ` ${stripQuoted(command).replace(/\s+/g, ' ')} `;
+  if (/\bgit\b[^;&|]*\s--no-verify\b/.test(plain)) return 'git --no-verify bypasses hooks';
+  if (/\bgit\b[^;&|]*\bcommit\b[^;&|]*\s-[a-zA-Z]*n[a-zA-Z]*\s/.test(plain)) return 'git commit -n bypasses hooks';
+  if (/core\.hooksPath/.test(command)) return 'overriding core.hooksPath bypasses hooks';
+  if (/\b(sh|bash|zsh|eval)\b[^;&|]*\bgit\b[^;&|]*\bpush\b/.test(command) && /\b(sh|bash|zsh)\s+-c\b|\beval\b/.test(command)) {
+    return 'git push inside sh -c/eval cannot be checked';
+  }
+  const cmd = ` ${unquote(command).replace(/\s+/g, ' ')} `;
   const pushes = cmd.match(/\bgit\b[^;&|]*\bpush\b[^;&|]*/g) || [];
   for (const p of pushes) {
-    if (/\s(--force|--force-with-lease|-f)(\s|=)/.test(`${p} `) || /\s\+\S+/.test(p)) return 'force-push is never allowed';
-    const tokens = p.trim().split(' ').slice(p.trim().split(' ').indexOf('push') + 1).filter((t) => !t.startsWith('-'));
-    // Check every positional token (a flag value like `--push-option x` must not hide the refspec).
-    for (const t of tokens) {
-      const dest = t.includes(':') ? t.split(':').pop() : t;
-      const branch = dest.replace(/^refs\/heads\//, '');
-      if (PROTECTED.includes(branch)) return `pushing to ${branch} is never allowed; open a draft PR`;
+    if (/[$`]/.test(p)) return 'git push with shell expansion cannot be checked';
+    if (/\s(--force|--force-with-lease|--force-if-includes|--mirror|--all|--delete)(\s|=)/.test(`${p} `)) return 'force/mirror/all/delete pushes are never allowed';
+    if (/\s-[a-zA-Z]*[fd][a-zA-Z]*(\s|$)/.test(`${p} `) || /\s\+\S+/.test(p)) return 'force-push is never allowed';
+    for (const dest of pushDestinations(p)) {
+      if (dest === '<delete>') return 'deleting remote branches with git push is not allowed';
+      const branch = dest === '<implicit>' ? currentBranch() : dest;
+      if (branch == null) return 'git push without an explicit feature/ refspec; use git push -u origin HEAD:refs/heads/<feature-branch>';
+      if (PROTECTED.includes(branch)) return `pushing to ${branch} is never allowed; open a PR into develop`;
     }
   }
   return null;
@@ -33,16 +61,17 @@ export function findViolation(command) {
 
 // gh pr merge is allowed only into develop (strict gitflow); main/master releases are human-only.
 export function mergeTarget(command) {
-  const m = command.match(/\bgh\s+pr\s+merge\b([^;&|]*)/);
+  const m = unquote(command).match(/\bgh\s+pr\s+merge\b([^;&|]*)/);
   if (!m) return null;
   const args = m[1].trim().split(/\s+/).filter(Boolean);
   const repoIdx = args.findIndex((a) => a === '-R' || a === '--repo');
   const repo = repoIdx >= 0 ? args[repoIdx + 1] : null;
-  const pr = args.find((a, i) => !a.startsWith('-') && (repoIdx < 0 || i !== repoIdx + 1));
+  const pr = args.find((a) => /^(\d+|https:\/\/github\.com\/\S+\/pull\/\d+)$/.test(a));
   return { pr: pr || null, repo };
 }
 
 export function checkMerge(command, lookupBase) {
+  if (/\bgh\s+api\b[^;&|]*\/merge\b/.test(command)) return 'merge via gh api is not allowed; use gh pr merge <n>';
   const t = mergeTarget(command);
   if (!t) return null;
   if (!t.pr) return 'gh pr merge needs an explicit PR number so the base can be checked';
@@ -63,7 +92,12 @@ async function main() {
   if (!input) process.exit(0);
   const command = input.tool_input?.command;
   if (typeof command === 'string') {
-    const v = findViolation(command) || checkMerge(command, ghBase);
+    const cwd = input.cwd || process.cwd();
+    const currentBranch = () => {
+      const res = spawnSync('git', ['-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' });
+      return res.status === 0 ? res.stdout.trim() : null;
+    };
+    const v = findViolation(command, currentBranch) || checkMerge(command, ghBase);
     if (v) block('git-guard', `${v} (rules/git-safety.md).`);
   }
   process.exit(0);
