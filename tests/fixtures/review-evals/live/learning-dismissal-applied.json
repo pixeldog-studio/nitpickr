@@ -21,7 +21,7 @@
     "instructionText": "",
     "memory": [
       {
-        "summary": "Dismissed before, do not raise again: fetch call has no timeout. In this repo the edge runtime aborts every outbound request after 10 s, so per-call timeouts are not wanted.",
+        "summary": "Dismissed before, do not raise again: the user id is interpolated into the profile URL without validation or encoding. In this repo user ids are server-generated UUIDs, so they're safe in URL paths.",
         "path": "src/profile/client.ts"
       }
     ],

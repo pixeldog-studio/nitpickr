@@ -82,3 +82,21 @@ describe("parsing nitpickr's own comments", () => {
     );
   });
 });
+
+describe("renderFixLine", () => {
+  it("states the fix without the agent prompt's file scoping", async () => {
+    const { renderFixLine } = await import(
+      "../../src/publisher/review-publisher.js"
+    );
+    expect(
+      renderFixLine(
+        "In `src/a.ts` around line 12, return early when the list is empty.\n\nFailure scenario: crash",
+        "src/a.ts",
+      ),
+    ).toEqual(["**Fix:** Return early when the list is empty.", ""]);
+    expect(
+      renderFixLine("In src/a.ts at line 4, use a guard.", "src/a.ts"),
+    ).toEqual(["**Fix:** Use a guard.", ""]);
+    expect(renderFixLine("Resolve: something.", "src/a.ts")).toEqual([]);
+  });
+});

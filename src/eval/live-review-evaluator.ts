@@ -673,11 +673,27 @@ export function summarizeLearningPairs(
     if (!applied) {
       return [];
     }
-    // An errored control has no findings, which would look like a change.
+    // Learning applied: the control raised the issue (inline or for a
+    // second look) and, with the learning, nothing is raised at those
+    // spots. The verifier sends many findings to the second-look list, so
+    // counting inline findings only would miss the effect. An errored case
+    // has no findings, which would look like a change.
+    const raised = (entry: LiveCaseReport) => [
+      ...entry.findings,
+      ...((entry.secondLook ?? []) as Array<{ path: string; line: number }>),
+    ];
+    const controlSpots = raised(control);
+    const stillRaised = raised(applied).some((finding) =>
+      controlSpots.some(
+        (spot) =>
+          spot.path === finding.path && Math.abs(spot.line - finding.line) <= 3,
+      ),
+    );
     const changed =
       control.error === null &&
-      (control.findings.length !== applied.findings.length ||
-        control.matched.length !== applied.matched.length);
+      applied.error === null &&
+      (control.matchedIncludingSecondLook ?? control.matched.length) > 0 &&
+      !stillRaised;
     return [
       {
         name,
@@ -689,7 +705,7 @@ export function summarizeLearningPairs(
           passed: casePassed(applied),
           findings: applied.findings.length,
         },
-        learningApplied: casePassed(applied) && changed,
+        learningApplied: changed,
       },
     ];
   });

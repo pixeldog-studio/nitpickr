@@ -158,6 +158,31 @@ function escapeMarkdownTableCell(value: string): string {
   return neutralizeProse(value).replace(/\|/g, "\\|");
 }
 
+/**
+ * The recommended fix as a teammate would say it: the model's agent prompt
+ * without its "In `file` around line N," scoping, which the comment's
+ * anchor already shows. Every inline comment states the issue and the fix.
+ */
+export function renderFixLine(fixPrompt: string, path: string): string[] {
+  const escapedPath = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const instruction = fixPrompt
+    .replace(/\n\nFailure scenario:[\s\S]*$/, "")
+    .replace(
+      new RegExp(
+        `^\\s*(?:in|at)\\s+\`?${escapedPath}\`?(?:\\s+(?:around|at|on)\\s+line\\s+\\d+)?\\s*[,:]\\s*`,
+        "i",
+      ),
+      "",
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+  if (instruction.length === 0 || /^resolve:/i.test(instruction)) {
+    return [];
+  }
+  const sentence = `${instruction.charAt(0).toUpperCase()}${instruction.slice(1)}`;
+  return [`**Fix:** ${sentence}`, ""];
+}
+
 function renderGitHubSuggestion(suggestedChange: string | undefined): string[] {
   if (!suggestedChange) {
     return [];
@@ -700,6 +725,7 @@ export class ReviewPublisher {
             "",
             `${finding.body}`,
             "",
+            ...renderFixLine(finding.fixPrompt, finding.path),
             ...renderGitHubSuggestion(finding.suggestedChange),
             `<!-- nitpickr:fingerprint:${fingerprintFinding(finding)} -->`,
             "<details>",

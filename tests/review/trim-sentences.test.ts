@@ -27,21 +27,7 @@ describe("maybeTrimSentenceCount", () => {
   });
 });
 
-describe("trimKeepingLastSentence", () => {
-  it("keeps the recommended fix when a body runs long", async () => {
-    const { trimKeepingLastSentence } = await import(
-      "../../src/review/review-engine.js"
-    );
-    expect(
-      trimKeepingLastSentence(
-        "It throws on empty input. Callers crash. Retries make it worse. Return early when the list is empty.",
-        3,
-      ),
-    ).toBe(
-      "It throws on empty input. Callers crash. Return early when the list is empty.",
-    );
-  });
-
+describe("sentence ends", () => {
   it("does not end a sentence at e.g., i.e. or a number", async () => {
     const { maybeTrimSentenceCount } = await import(
       "../../src/review/review-engine.js"

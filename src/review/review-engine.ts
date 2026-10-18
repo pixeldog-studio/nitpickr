@@ -263,24 +263,6 @@ function sentenceEnds(value: string): number[] {
 }
 
 /**
- * Like maybeTrimSentenceCount, but a long body keeps its last sentence: the
- * prompt asks for the problem, the impact, then the recommended fix, and the
- * fix is the part a reader can't do without.
- */
-export function trimKeepingLastSentence(
-  value: string,
-  maxSentences: number,
-): string {
-  const ends = sentenceEnds(value);
-  if (ends.length <= maxSentences || maxSentences < 2) {
-    return maybeTrimSentenceCount(value, maxSentences);
-  }
-  const head = value.slice(0, ends[maxSentences - 2]).trim();
-  const last = value.slice(ends.at(-2), ends.at(-1)).trim();
-  return `${head} ${last}`;
-}
-
-/**
  * One short paragraph even when the PR was reviewed in chunks: the first
  * sentence of each chunk's summary, at most three.
  */
@@ -324,9 +306,9 @@ function withScopedFixPrompt(
     return undefined;
   }
 
-  const hasPath = body.includes(path);
-  const hasLine = new RegExp(`\\bline\\s+${line}\\b`, "i").test(body);
-  if (hasPath && hasLine) {
+  // Already scoped by the model ("In src/a.ts at line 12, …"): adding our
+  // own prefix would read "In `a.ts` around line 12, In src/a.ts, …".
+  if (body.includes(path)) {
     return body;
   }
 
@@ -380,7 +362,7 @@ function normalizeFinding(value: unknown): ReviewFinding | null {
   const category = normalizeCategory(candidate.category);
   const title = normalizeString(candidate.title);
   const body = normalizeString(candidate.body);
-  const conciseBody = body ? trimKeepingLastSentence(body, 3) : undefined;
+  const conciseBody = body ? maybeTrimSentenceCount(body, 2) : undefined;
   const fixPrompt =
     path && line
       ? withScopedFixPrompt(
