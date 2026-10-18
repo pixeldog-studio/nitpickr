@@ -6,16 +6,16 @@
   "expectedVerdicts": [],
   "input": {
     "changeRequest": {
-      "title": "Load profiles from the profile service",
-      "number": 301
+      "title": "Save watering reminders",
+      "number": 302
     },
     "files": [
       {
-        "path": "src/profile/client.ts",
+        "path": "src/reminders/repository.ts",
         "additions": 13,
         "deletions": 0,
-        "patch": "@@ -0,0 +1,13 @@\n+import { httpClient } from \"@/lib/http-client\";\n+\n+export async function fetchProfile(userId: string) {\n+  const response = await fetch(`${process.env.PROFILE_API}/profiles/${userId}`);\n+  if (!response.ok) {\n+    throw new Error(`profile ${userId}: ${response.status}`);\n+  }\n+  return response.json();\n+}\n+\n+export async function fetchSettings(userId: string) {\n+  return httpClient.get(`/settings/${userId}`);\n+}",
-        "fileContent": "import { httpClient } from \"@/lib/http-client\";\n\nexport async function fetchProfile(userId: string) {\n  const response = await fetch(`${process.env.PROFILE_API}/profiles/${userId}`);\n  if (!response.ok) {\n    throw new Error(`profile ${userId}: ${response.status}`);\n  }\n  return response.json();\n}\n\nexport async function fetchSettings(userId: string) {\n  return httpClient.get(`/settings/${userId}`);\n}\n"
+        "patch": "@@ -0,0 +1,13 @@\n+import type { SupabaseClient } from \"@supabase/supabase-js\";\n+\n+export async function saveReminder(\n+  supabase: SupabaseClient,\n+  userId: string,\n+  plantId: string,\n+  everyDays: number,\n+) {\n+  await supabase\n+    .from(\"watering_reminders\")\n+    .upsert({ user_id: userId, plant_id: plantId, every_days: everyDays });\n+  return { ok: true };\n+}",
+        "fileContent": "import type { SupabaseClient } from \"@supabase/supabase-js\";\n\nexport async function saveReminder(\n  supabase: SupabaseClient,\n  userId: string,\n  plantId: string,\n  everyDays: number,\n) {\n  await supabase\n    .from(\"watering_reminders\")\n    .upsert({ user_id: userId, plant_id: plantId, every_days: everyDays });\n  return { ok: true };\n}\n"
       }
     ],
     "instructionText": "",
@@ -23,9 +23,10 @@
     "commentBudget": 10,
     "dismissals": [
       {
-        "title": "fetch call has no timeout",
-        "body": "A slow upstream can hang the request forever; add an AbortSignal timeout.",
-        "path": "src/profile/client.ts"
+        "title": "Database errors are silently ignored",
+        "body": "The function discards the error returned by the Supabase client and always returns `{ ok: true }`. This causes the caller to believe the save succeeded even when the database operation fails.",
+        "path": "src/reminders/repository.ts",
+        "category": "correctness"
       }
     ]
   },

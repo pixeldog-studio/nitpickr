@@ -72,22 +72,34 @@ export function parseInlineCommentContext(body: string): {
   const lines = body.split("\n");
   const titleMatch = /\*\*(.+?)\*\*/.exec(lines[0] ?? "");
   const whereIndex = lines.findIndex((line) => line.startsWith("**Where:**"));
-  const bodyLine = lines
-    .slice(whereIndex >= 0 ? whereIndex + 1 : 1)
-    .find(
-      (line) =>
-        line.trim().length > 0 &&
-        !line.startsWith("```") &&
-        !line.startsWith("<!--") &&
-        !line.startsWith("<details>") &&
-        !line.startsWith("<summary>"),
-    );
+  // The body is the first paragraph after the title (and the severity
+  // label or old "Where:" line): all of it, since the fix comes last.
+  const isBodyLine = (line: string) =>
+    line.trim().length > 0 &&
+    !/^(⚪|🟡|🟠|🔴) /.test(line) &&
+    !line.startsWith("```") &&
+    !line.startsWith("<!--") &&
+    !line.startsWith("<details>") &&
+    !line.startsWith("<summary>");
+  const rest = lines.slice(whereIndex >= 0 ? whereIndex + 1 : 1);
+  const start = rest.findIndex(isBodyLine);
+  const paragraph: string[] = [];
+  for (const line of start < 0 ? [] : rest.slice(start)) {
+    if (!isBodyLine(line)) {
+      break;
+    }
+    paragraph.push(line.trim());
+  }
+  const bodyLine = paragraph.length > 0 ? paragraph.join(" ") : undefined;
   const fixPromptMatch = /```text\n([\s\S]*?)\n```/.exec(body);
 
   return {
     title: titleMatch?.[1]?.trim() ?? "nitpickr finding",
     body: bodyLine?.trim() ?? "This finding needs a closer look.",
-    fixPrompt: fixPromptMatch?.[1]?.trim() ?? null,
+    // The agent prompt may carry a "Failure scenario:" note for coding
+    // agents; why/teach/fix replies only want the instruction.
+    fixPrompt:
+      fixPromptMatch?.[1]?.split(/\n\nFailure scenario:/)[0]?.trim() ?? null,
   };
 }
 

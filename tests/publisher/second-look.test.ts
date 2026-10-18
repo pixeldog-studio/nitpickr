@@ -27,7 +27,7 @@ describe("second look", () => {
   });
 
   it("does not say 'no further comments' while items are listed", () => {
-    expect(buildEndStateLine(0, 2)).toContain("Nothing blocking");
+    expect(buildEndStateLine(0, 2)).toContain("No confirmed issues");
     expect(buildEndStateLine(0)).toContain("No further comments");
   });
 
@@ -44,5 +44,89 @@ describe("second look", () => {
       "high",
     );
     expect(kept.secondLook?.map((entry) => entry.title)).toEqual(["high"]);
+  });
+});
+
+describe("first-review headline", () => {
+  it("counts unconfirmed items instead of saying nothing was found", async () => {
+    const { summarizeFindingCount } = await import(
+      "../../src/publisher/review-publisher.js"
+    );
+    expect(summarizeFindingCount([], 2)).toBe(
+      "no confirmed issues; 2 unconfirmed items below.",
+    );
+    expect(summarizeFindingCount([])).toBe(
+      "nothing worth flagging in this PR.",
+    );
+  });
+});
+
+describe("parsing nitpickr's own comments", () => {
+  it("reads the whole first paragraph so the fix isn't lost", async () => {
+    const { parseInlineCommentContext } = await import(
+      "../../src/review/reviewer-chat-service.js"
+    );
+    const parsed = parseInlineCommentContext(
+      [
+        "**Fetch has no timeout**",
+        "🟠 High · reliability",
+        "",
+        "A slow upstream hangs the request.",
+        "Pass an AbortSignal with a 5 s timeout.",
+        "",
+        "<!-- nitpickr:fingerprint:x -->",
+      ].join("\n"),
+    );
+    expect(parsed.body).toBe(
+      "A slow upstream hangs the request. Pass an AbortSignal with a 5 s timeout.",
+    );
+  });
+});
+
+describe("renderFixLine", () => {
+  it("states the fix without the agent prompt's file scoping", async () => {
+    const { renderFixLine } = await import(
+      "../../src/publisher/review-publisher.js"
+    );
+    expect(
+      renderFixLine(
+        "In `src/a.ts` around line 12, return early when the list is empty.\n\nFailure scenario: crash",
+        "src/a.ts",
+      ),
+    ).toEqual(["**Fix:** Return early when the list is empty.", ""]);
+    expect(
+      renderFixLine("In src/a.ts at line 4, use a guard.", "src/a.ts"),
+    ).toEqual(["**Fix:** Use a guard.", ""]);
+    expect(renderFixLine("Resolve: something.", "src/a.ts")).toEqual([]);
+  });
+});
+
+describe("inline comment safety", () => {
+  it("neutralizes model text in the body and the Fix line", async () => {
+    const { ReviewPublisher } = await import(
+      "../../src/publisher/review-publisher.js"
+    );
+    const [comment] = new ReviewPublisher({} as never).buildInlineComments([
+      {
+        path: "a.ts",
+        line: 1,
+        severity: "high",
+        category: "security",
+        findingType: "bug",
+        title: "t",
+        body: "Bad <img src=x> cc @victim <!-- nitpickr:fingerprint:fake -->",
+        fixPrompt:
+          "In `a.ts` around line 1, add ![x](https://evil/p.png) a guard.",
+      } as never,
+    ]);
+    expect(comment?.body).not.toContain("<img");
+    // The agent prompt keeps the raw text, but inside a code block GitHub
+    // never renders it; the visible Fix line must not embed the image.
+    const fixLine = comment?.body
+      .split("\n")
+      .find((line) => line.startsWith("**Fix:**"));
+    expect(fixLine).toContain("!&#91;x]");
+    expect(comment?.body).toContain("@​victim");
+    expect(comment?.body.match(/<!-- nitpickr:fingerprint:/g)).toHaveLength(1);
   });
 });

@@ -126,6 +126,9 @@ export class PromptBuilder {
         "Each finding: path, line (a line that appears in the patch), findingType ('bug' | 'safe_suggestion' | 'question' | 'teaching_note'), severity ('medium' | 'high' | 'critical'), category ('correctness' | 'performance' | 'security' | 'maintainability' | 'testing'), title, evidence, failureScenario, body, fixPrompt, suggestedChange.",
         "evidence: the exact line(s) copied verbatim from the patch that contain the defect.",
         "failureScenario: the concrete input or state, what happens, and what should happen instead.",
+        // Problem then impact only: asking the body to also recommend a fix
+        // cost ~15 points of inline precision in the eval (83% -> 68%); the
+        // fix is shown from fixPrompt instead.
         "title: the problem in under 10 words. body: one or two short sentences, problem then impact, no hedging.",
         "fixPrompt: an instruction for a coding agent naming the file path and line.",
         "suggestedChange: replacement code only, for a small local fix you are sure of; otherwise null.",

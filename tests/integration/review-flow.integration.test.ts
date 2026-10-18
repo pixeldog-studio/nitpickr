@@ -1071,9 +1071,9 @@ describe("review flow integration", () => {
     expect(processed).toBe(true);
     expect(harness.publishClient.reviews).toHaveLength(1);
     expect(harness.publishClient.reviews[0]?.body).toContain(
-      "## nitpickr commit review",
+      "**nitpickr** · `",
     );
-    expect(harness.publishClient.reviews[0]?.body).toContain("Commit:");
+    expect(harness.publishClient.reviews[0]?.body).toContain("new finding");
     expect(harness.publishClient.reviews[0]?.body).not.toContain(
       "# nitpickr review ✨",
     );

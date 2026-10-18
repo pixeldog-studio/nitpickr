@@ -217,8 +217,20 @@ export function maybeTrimSentenceCount(
   value: string,
   maxSentences: number,
 ): string {
+  const ends = sentenceEnds(value);
+  const cut = ends[maxSentences - 1];
+  return cut === undefined || cut === ends.at(-1)
+    ? value.trim()
+    : value.slice(0, cut).trim();
+}
+
+/** "e.g." or "No. 3" end a word, not a sentence. */
+const NON_TERMINAL_WORD = /(?:^|\s)(?:e\.g|i\.e|vs|etc|cf|approx|no|\d+)\.$/i;
+
+/** Offsets just past each sentence end, outside inline code. */
+function sentenceEnds(value: string): number[] {
+  const ends: number[] = [];
   let inCode = false;
-  let sentences = 0;
   for (let index = 0; index < value.length; index += 1) {
     const character = value[index];
     if (character === "`") {
@@ -232,14 +244,55 @@ export function maybeTrimSentenceCount(
       continue;
     }
     const next = value[index + 1];
-    if (next === undefined || /\s/.test(next)) {
-      sentences += 1;
-      if (sentences === maxSentences) {
-        return value.slice(0, index + 1).trim();
-      }
+    if (next !== undefined && !/\s/.test(next)) {
+      continue;
     }
+    if (
+      character === "." &&
+      NON_TERMINAL_WORD.test(value.slice(Math.max(0, index - 8), index + 1))
+    ) {
+      continue;
+    }
+    ends.push(index + 1);
   }
-  return value.trim();
+  const trailing = value.slice(ends.at(-1) ?? 0).trim();
+  if (trailing.length > 0) {
+    ends.push(value.length);
+  }
+  return ends;
+}
+
+/**
+ * One short paragraph even when the PR was reviewed in chunks: the first
+ * sentence of each chunk's summary, at most three.
+ */
+function joinChunkSummaries(summaries: string[]): string {
+  if (summaries.length === 0) {
+    return defaultSummary;
+  }
+  return summaries.length === 1
+    ? maybeTrimSentenceCount(summaries[0] ?? "", 2)
+    : maybeTrimSentenceCount(
+        summaries
+          .map((summary) => maybeTrimSentenceCount(summary, 1))
+          .join(" "),
+        3,
+      );
+}
+
+/** Never let the sentence cap hide that part of the PR went unreviewed. */
+function withSkippedNotice(summary: string, skippedPaths: string[]): string {
+  if (skippedPaths.length === 0) {
+    return summary;
+  }
+  const shown = skippedPaths
+    .slice(0, 3)
+    .map((path) => `\`${path}\``)
+    .join(", ");
+  const more =
+    skippedPaths.length > 3 ? ` and ${skippedPaths.length - 3} more` : "";
+  const notice = `I couldn't review ${shown}${more}: my reply kept running past its length limit.`;
+  return summary === defaultSummary ? notice : `${summary} ${notice}`;
 }
 
 function withScopedFixPrompt(
@@ -253,9 +306,9 @@ function withScopedFixPrompt(
     return undefined;
   }
 
-  const hasPath = body.includes(path);
-  const hasLine = new RegExp(`\\bline\\s+${line}\\b`, "i").test(body);
-  if (hasPath && hasLine) {
+  // Already scoped by the model ("In src/a.ts at line 12, …"): adding our
+  // own prefix would read "In `a.ts` around line 12, In src/a.ts, …".
+  if (body.includes(path)) {
     return body;
   }
 
@@ -973,6 +1026,7 @@ export class ReviewEngine {
   async #generateChunkReview(
     prompt: { system: string; user: string },
     files: Array<{ path: string }>,
+    skippedPaths: string[],
   ): Promise<unknown> {
     const generate = (user: string) =>
       this.#model.generateStructuredReview({
@@ -993,14 +1047,8 @@ export class ReviewEngine {
       if (!(error instanceof TruncatedOutputError)) {
         throw error;
       }
-      const paths = files.map((file) => `\`${file.path}\``);
-      const shown = paths.slice(0, 3).join(", ");
-      const more = paths.length > 3 ? ` and ${paths.length - 3} more` : "";
-      return {
-        summary: `I couldn't review ${shown}${more}: my reply kept running past its length limit.`,
-        findings: [],
-        priorThreadVerdicts: [],
-      };
+      skippedPaths.push(...files.map((file) => file.path));
+      return { summary: "", findings: [], priorThreadVerdicts: [] };
     }
   }
 
@@ -1179,6 +1227,8 @@ export class ReviewEngine {
       chunkMemory: chunkMemories,
     });
 
+    // Chunks whose reply kept hitting the output cap; always reported.
+    const skippedPaths: string[] = [];
     const responses = await mapWithConcurrency(
       chunks,
       this.#maxConcurrentModelRequests,
@@ -1208,7 +1258,11 @@ export class ReviewEngine {
             : {}),
         });
 
-        const response = await this.#generateChunkReview(prompt, files);
+        const response = await this.#generateChunkReview(
+          prompt,
+          files,
+          skippedPaths,
+        );
         const parsed = modelResponseSchema.parse(response);
         // A chunk may only judge threads it was shown.
         const shownThreadIds = new Set(
@@ -1245,7 +1299,19 @@ export class ReviewEngine {
 
     return {
       result: {
-        summary: responses.map((response) => response.summary).join("\n\n"),
+        // One short paragraph even when the PR was reviewed in chunks: the
+        // first sentence of each chunk's summary, at most three.
+        summary: withSkippedNotice(
+          joinChunkSummaries(
+            responses
+              .map((response) => response.summary)
+              .filter(
+                (summary) =>
+                  summary.trim().length > 0 && summary !== defaultSummary,
+              ),
+          ),
+          skippedPaths,
+        ),
         mermaid: renderMergedDiagram(responses),
         findings: mergedFindings,
         priorThreadVerdicts,

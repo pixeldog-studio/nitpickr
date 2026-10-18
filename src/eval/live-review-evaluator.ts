@@ -158,7 +158,13 @@ export interface LiveCaseReport {
   /** Expectations matched by inline or second-look findings. */
   matchedIncludingSecondLook?: number;
   secondLook?: Array<
-    Pick<ReviewFinding, "path" | "line" | "severity" | "category" | "title">
+    Pick<ReviewFinding, "path" | "line" | "severity" | "category" | "title"> &
+      Partial<
+        Pick<
+          ReviewFinding,
+          "findingType" | "body" | "fixPrompt" | "verification"
+        >
+      >
   >;
   durationMs: number;
   modelCalls: number;
@@ -183,7 +189,8 @@ export interface LiveCaseReport {
       | "title"
       | "body"
       | "verification"
-    >
+    > &
+      Partial<Pick<ReviewFinding, "fixPrompt" | "failureScenario">>
   >;
   error: string | null;
 }
@@ -511,7 +518,13 @@ export class LiveReviewEvaluator {
           line: finding.line,
           severity: finding.severity,
           category: finding.category,
+          findingType: finding.findingType,
           title: finding.title,
+          body: finding.body,
+          fixPrompt: finding.fixPrompt,
+          ...(finding.verification
+            ? { verification: finding.verification }
+            : {}),
         })),
         verdictsCorrect: fixture.expectedVerdicts.filter(
           (entry) => verdicts.get(entry.threadId) === entry.verdict,
@@ -544,6 +557,11 @@ export class LiveReviewEvaluator {
           findingType: finding.findingType,
           title: finding.title,
           body: finding.body,
+          // Kept so a voice sample shows what was really posted.
+          fixPrompt: finding.fixPrompt,
+          ...(finding.failureScenario
+            ? { failureScenario: finding.failureScenario }
+            : {}),
           ...(finding.verification
             ? { verification: finding.verification }
             : {}),
@@ -655,11 +673,27 @@ export function summarizeLearningPairs(
     if (!applied) {
       return [];
     }
-    // An errored control has no findings, which would look like a change.
+    // Learning applied: the control raised the issue (inline or for a
+    // second look) and, with the learning, nothing is raised at those
+    // spots. The verifier sends many findings to the second-look list, so
+    // counting inline findings only would miss the effect. An errored case
+    // has no findings, which would look like a change.
+    const raised = (entry: LiveCaseReport) => [
+      ...entry.findings,
+      ...((entry.secondLook ?? []) as Array<{ path: string; line: number }>),
+    ];
+    const controlSpots = raised(control);
+    const stillRaised = raised(applied).some((finding) =>
+      controlSpots.some(
+        (spot) =>
+          spot.path === finding.path && Math.abs(spot.line - finding.line) <= 3,
+      ),
+    );
     const changed =
       control.error === null &&
-      (control.findings.length !== applied.findings.length ||
-        control.matched.length !== applied.matched.length);
+      casePassed(applied) &&
+      (control.matchedIncludingSecondLook ?? control.matched.length) > 0 &&
+      !stillRaised;
     return [
       {
         name,
@@ -671,7 +705,7 @@ export function summarizeLearningPairs(
           passed: casePassed(applied),
           findings: applied.findings.length,
         },
-        learningApplied: casePassed(applied) && changed,
+        learningApplied: changed,
       },
     ];
   });

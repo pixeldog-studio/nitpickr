@@ -33,7 +33,7 @@ Baseline commit: `e7aecec`. One PR per milestone; never merge; nitpickr reviews 
 - [x] `@nitpickrai <question>` answered by the model, grounded in the PR; `reconsider` re-runs the verifier; command tips in the first review
 - [x] Two independent reviews: 7 + 6 issues fixed (answers were requested in JSON mode, unescaped answers, non-retried posts, untrusted headings, human threads, edits)
 - [x] Merged as #18 (19a8621)
-- [ ] Live check of an `@nitpickrai` question (after deploy)
+- [x] Live check (#22, 2026-10-17 15:29 UTC): "@nitpickrai why does a severe finding in a different file need 0.92…?" got a model answer citing `src/memory/dismissal-policy.ts:14-16` with the correct rationale. Two earlier tries failed visibly: the mention wasn't at a line start (fixed in #22), then Ollama stopped serving the model (watchdog in #25).
 
 ## Production fixes found while dogfooding (2026-10-17)
 - [x] #17 worker ids unique per start (orphaned job blocked the queue 15 h)
@@ -43,6 +43,10 @@ Baseline commit: `e7aecec`. One PR per milestone; never merge; nitpickr reviews 
 - [ ] Follow-up: ownership-guard completeJob/failJob; escalate repeated heartbeat failures
 ## Milestone 5 — learning
 ## Milestone 6 — voice
+- [x] Voice sample (20 comments + summary) approved by the owner on 2026-10-17, with one requirement: every comment is clear, reads like a colleague, and states the issue and the recommended fix (now in the review prompt)
+- [x] Inline comments: bold problem, one label line, no "Where:" line; first review leads with one headline; multi-chunk summaries are one short paragraph
+- [x] Eval reports keep the fix prompt and failure scenario so the final sample shows real output
+- [ ] Final full eval on the stack; regenerate the sample from it
 
 ## Dogfood scorecard
 

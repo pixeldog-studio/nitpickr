@@ -24,7 +24,7 @@
   },
   "expectedFindings": [
     {
-      "label": "raw fetch without timeout",
+      "label": "the user id is interpolated into the request URL without validation or encoding",
       "path": "src/profile/client.ts",
       "lineStart": 4,
       "lineEnd": 4

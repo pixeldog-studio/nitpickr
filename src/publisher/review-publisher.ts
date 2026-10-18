@@ -27,6 +27,7 @@ export interface PublishedFinding {
   body: string;
   fixPrompt: string;
   suggestedChange?: string | undefined;
+  failureScenario?: string | undefined;
 }
 
 export interface PublishReviewClient {
@@ -87,26 +88,20 @@ export interface PublishedInlineComment {
   resolvedAt?: string | null;
 }
 
-const severityEmoji: Record<PublishedFinding["severity"], string> = {
-  low: "🔹",
-  medium: "🟠",
-  high: "⚠️",
-  critical: "🚨",
+const severityLabel: Record<PublishedFinding["severity"], string> = {
+  low: "⚪ Low",
+  medium: "🟡 Medium",
+  high: "🟠 High",
+  critical: "🔴 Critical",
 };
 
-const categoryEmoji: Record<PublishedFinding["category"], string> = {
-  correctness: "🧩",
-  performance: "⚡",
-  security: "🔒",
-  maintainability: "🛠️",
-  testing: "🧪",
-  style: "🎨",
+const severityDot: Record<PublishedFinding["severity"], string> = {
+  low: "⚪",
+  medium: "🟡",
+  high: "🟠",
+  critical: "🔴",
 };
 
-/**
- * Findings the verifier could not confirm: still worth knowing about, but
- * not worth interrupting someone with an inline comment.
- */
 /**
  * One line of model-written prose that is safe to drop into the summary:
  * the model echoes PR content, so it must not be able to close the
@@ -131,6 +126,10 @@ export function neutralizeProse(text: string, maxLength = 400): string {
     .join("");
 }
 
+/**
+ * Findings the verifier could not confirm: still worth knowing about, but
+ * not worth interrupting someone with an inline comment.
+ */
 export function renderSecondLook(findings: PublishedFinding[]): string | null {
   if (findings.length === 0) {
     return null;
@@ -148,12 +147,42 @@ export function renderSecondLook(findings: PublishedFinding[]): string | null {
   ].join("\n");
 }
 
+/** One scannable line under the title: severity and what kind of problem. */
+export function renderFindingLabel(
+  finding: Pick<PublishedFinding, "severity" | "category">,
+): string {
+  return `${severityLabel[finding.severity]} · ${finding.category}`;
+}
+
 function escapeMarkdownTableCell(value: string): string {
   return neutralizeProse(value).replace(/\|/g, "\\|");
 }
 
-function renderSignal(finding: PublishedFinding): string {
-  return `${severityEmoji[finding.severity]} ${categoryEmoji[finding.category]}`;
+/**
+ * The recommended fix as a teammate would say it: the model's agent prompt
+ * without its "In `file` around line N," scoping, which the comment's
+ * anchor already shows. Every inline comment states the issue and the fix.
+ */
+export function renderFixLine(fixPrompt: string, path: string): string[] {
+  const escapedPath = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const instruction = fixPrompt
+    .replace(/\n\nFailure scenario:[\s\S]*$/, "")
+    .replace(
+      new RegExp(
+        `^\\s*(?:in|at)\\s+\`?${escapedPath}\`?(?:\\s+(?:around|at|on)\\s+line\\s+\\d+)?\\s*[,:]\\s*`,
+        "i",
+      ),
+      "",
+    )
+    .trim();
+  if (instruction.length === 0 || /^resolve:/i.test(instruction)) {
+    return [];
+  }
+  // Model text that may echo PR content: no HTML, images, @-mentions or
+  // fake markers in a comment posted under nitpickr's name.
+  const safe = neutralizeProse(instruction, 300);
+  const sentence = `${safe.charAt(0).toUpperCase()}${safe.slice(1)}`;
+  return [`**Fix:** ${sentence}`, ""];
 }
 
 function renderGitHubSuggestion(suggestedChange: string | undefined): string[] {
@@ -164,16 +193,26 @@ function renderGitHubSuggestion(suggestedChange: string | undefined): string[] {
   return ["```suggestion", suggestedChange, "```", ""];
 }
 
-function summarizeFindingCount(count: number): string {
-  if (count === 0) {
-    return "No actionable inline findings.";
+/** The headline after "nitpickr ·" in the first review. */
+export function summarizeFindingCount(
+  findings: Array<Pick<PublishedFinding, "severity">>,
+  secondLookCount = 0,
+): string {
+  if (findings.length === 0 && secondLookCount > 0) {
+    return `no confirmed issues; ${secondLookCount} unconfirmed ${
+      secondLookCount === 1 ? "item" : "items"
+    } below.`;
   }
-
-  if (count === 1) {
-    return "Posted 1 inline finding.";
+  if (findings.length === 0) {
+    return "nothing worth flagging in this PR.";
   }
-
-  return `Posted ${count} inline findings.`;
+  const blocking = findings.some(
+    (finding) => finding.severity === "high" || finding.severity === "critical",
+  );
+  const noun = findings.length === 1 ? "thing" : "things";
+  return blocking
+    ? `${findings.length} ${noun} to fix before merging.`
+    : `${findings.length} ${noun} worth a look.`;
 }
 
 function buildReviewRunMarker(reviewRunId: string): string {
@@ -505,7 +544,7 @@ export function buildEndStateLine(
   secondLookCount = 0,
 ): string {
   if (openThreads === 0 && secondLookCount > 0) {
-    return `**Nothing blocking.** ${secondLookCount} unconfirmed ${
+    return `**No confirmed issues.** ${secondLookCount} unconfirmed ${
       secondLookCount === 1 ? "item is" : "items are"
     } listed below; check ${secondLookCount === 1 ? "it" : "them"} before merging.`;
   }
@@ -548,16 +587,20 @@ export class ReviewPublisher {
     summary: string;
     mermaid: string;
     findings: PublishedFinding[];
+    /** False when no files were reviewed (all ignored or none matched). */
+    reviewed?: boolean;
+    /** Unconfirmed findings listed under the summary. */
+    secondLookCount?: number;
   }): string {
     const findingTable =
       input.findings.length === 0
-        ? "- ✅ No actionable inline findings."
+        ? null
         : [
-            "| Signal | Location | Finding |",
+            "| | Where | Finding |",
             "| --- | --- | --- |",
             ...input.findings.map(
               (finding) =>
-                `| ${renderSignal(finding)} | \`${finding.path}:${finding.line}\` | **${escapeMarkdownTableCell(finding.title)}**<br />${escapeMarkdownTableCell(finding.body)} |`,
+                `| ${severityDot[finding.severity]} | \`${finding.path}:${finding.line}\` | ${escapeMarkdownTableCell(finding.title)} |`,
             ),
           ].join("\n");
 
@@ -565,17 +608,17 @@ export class ReviewPublisher {
       buildSummaryMarker(),
       buildReviewRunMarker(input.reviewRunId),
       "",
-      "# nitpickr review ✨",
+      `**nitpickr** · ${
+        input.reviewed === false
+          ? "nothing to review here."
+          : summarizeFindingCount(input.findings, input.secondLookCount ?? 0)
+      }`,
       "",
-      `> ${input.summary.trim()}`,
-      "",
-      `**Summary:** ${summarizeFindingCount(input.findings.length)}`,
-      "",
-      "## Findings",
-      findingTable,
+      input.summary.trim(),
+      ...(findingTable === null ? [] : ["", findingTable]),
       "",
       "<details>",
-      "<summary>🧭 Change flow</summary>",
+      "<summary>Change flow</summary>",
       "",
       "```mermaid",
       input.mermaid.trim(),
@@ -584,7 +627,7 @@ export class ReviewPublisher {
       "</details>",
       "",
       "<details>",
-      "<summary>💬 Talk to nitpickr</summary>",
+      "<summary>Talk to nitpickr</summary>",
       "",
       renderCommandTips(this.#botLogin),
       "",
@@ -610,23 +653,26 @@ export class ReviewPublisher {
     };
   }): string {
     const commitLabel = shortSha(input.reviewedCommitSha);
+    const headline =
+      input.counts.newFindings > 0
+        ? `${input.counts.newFindings} new ${
+            input.counts.newFindings === 1 ? "finding" : "findings"
+          } in this push.`
+        : buildEndStateLine(
+            input.counts.openThreads,
+            input.counts.secondLook ?? 0,
+          );
 
     return [
       buildReviewRunMarker(input.reviewRunId),
       "",
-      "## nitpickr commit review",
+      `**nitpickr**${commitLabel ? ` · \`${commitLabel}\`` : ""} · ${headline}`,
       "",
-      commitLabel ? `**Commit:** \`${commitLabel}\`` : null,
-      `> ${input.summary.trim()}`,
-      "",
-      input.counts.newFindings > 0
-        ? `New findings: ${input.counts.newFindings}`
-        : buildEndStateLine(
-            input.counts.openThreads,
-            input.counts.secondLook ?? 0,
-          ),
+      input.summary.trim(),
       input.counts.resolvedThreads > 0
-        ? `Resolved threads: ${input.counts.resolvedThreads}`
+        ? `\nResolved ${input.counts.resolvedThreads} ${
+            input.counts.resolvedThreads === 1 ? "thread" : "threads"
+          } this push fixed.`
         : null,
     ]
       .filter((line): line is string => line !== null)
@@ -676,18 +722,21 @@ export class ReviewPublisher {
           side: "RIGHT",
           fingerprint: fingerprintFinding(finding),
           body: [
-            `${renderSignal(finding)} **${finding.title}**`,
-            `**Where:** \`${finding.path}:${line}\``,
+            `**${finding.title}**`,
+            renderFindingLabel(finding),
             "",
-            `${finding.body}`,
+            neutralizeProse(finding.body, 1_000),
             "",
+            ...renderFixLine(finding.fixPrompt, finding.path),
             ...renderGitHubSuggestion(finding.suggestedChange),
             `<!-- nitpickr:fingerprint:${fingerprintFinding(finding)} -->`,
             "<details>",
-            "<summary>🤖 AI prompt</summary>",
+            "<summary>Prompt for your coding agent</summary>",
             "",
             "```text",
-            finding.fixPrompt,
+            finding.failureScenario
+              ? `${finding.fixPrompt}\n\nFailure scenario: ${finding.failureScenario}`
+              : finding.fixPrompt,
             "```",
             "",
             "</details>",
@@ -766,6 +815,9 @@ export class ReviewPublisher {
           });
 
     const openThreads = input.openPriorThreadCount ?? 0;
+    const postedFingerprints = new Set(
+      comments.map((comment) => comment.fingerprint),
+    );
     const body =
       input.publishMode === "commit_summary"
         ? this.buildCommitSummaryBody({
@@ -795,7 +847,13 @@ export class ReviewPublisher {
               reviewRunId: input.reviewRunId,
               summary: input.result.summary,
               mermaid: input.result.mermaid,
-              findings: input.result.findings,
+              // Only findings that became inline comments: the headline and
+              // table must match what the author actually sees.
+              findings: input.result.findings.filter((finding) =>
+                postedFingerprints.has(fingerprintFinding(finding)),
+              ),
+              reviewed: input.files === undefined || input.files.length > 0,
+              secondLookCount: input.result.secondLook?.length ?? 0,
             });
 
     const secondLook = renderSecondLook(input.result.secondLook ?? []);

@@ -26,3 +26,17 @@ describe("maybeTrimSentenceCount", () => {
     );
   });
 });
+
+describe("sentence ends", () => {
+  it("does not end a sentence at e.g., i.e. or a number", async () => {
+    const { maybeTrimSentenceCount } = await import(
+      "../../src/review/review-engine.js"
+    );
+    expect(
+      maybeTrimSentenceCount(
+        "Foo throws. Use e.g. `Map` here. Step 2. done",
+        2,
+      ),
+    ).toBe("Foo throws. Use e.g. `Map` here.");
+  });
+});
