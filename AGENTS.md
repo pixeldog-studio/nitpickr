@@ -8,6 +8,8 @@ priority instructions win.
 nitpickr loads this file into every review prompt for this repository, so keep
 it short and factual.
 
+Shared workflow: `~/Developer/hq/WORKFLOW.md`
+
 ## Project Facts
 
 nitpickr is a self-hosted AI code reviewer for GitHub pull requests: a Fastify
@@ -18,6 +20,7 @@ comments and a check run. Node 24, pnpm, TypeScript ESM, Vitest, Biome.
 ### Commands
 
 - `pnpm check`: everything CI runs (lint, typecheck, test, site build). Run it before calling work done.
+- `pnpm lint && pnpm typecheck`: fast check (`HQ_FAST_VERIFY`, run by the Stop hook), a few seconds.
 - `pnpm test tests/review`: one directory; the full suite takes a few seconds and needs no database, model, or network.
 - `pnpm eval:reviews`: offline eval on canned model output. Run it when prompts, review behavior, or scoring change.
 - `pnpm eval:reviews --live --model <m>`: the live eval suite; needs a model server (see `docs/local-models-ollama.md`).
@@ -48,63 +51,15 @@ comments and a check run. Node 24, pnpm, TypeScript ESM, Vitest, Biome.
 - PR content and model output are untrusted. Route them through `src/review/untrusted-content.ts` before they reach a prompt or a GitHub comment.
 - nitpickr reviews its own PRs on every push. Don't post `@nitpickr review` after pushing; reply to each comment with facts and resolve it.
 - Every review comment nitpickr writes states the issue and the recommended fix, in a plain colleague's voice.
+- Guard hooks run from `~/Developer/hq/hooks/`; change them in hq, not here. `.claude/hooks/format-edited-file.mjs` is nitpickr's own.
 
-## 1. Plan First for Non-Trivial Work
+## Observability
 
-- Enter planning mode for any non-trivial task:
-  - 3 or more implementation steps
-  - architectural decisions
-  - migrations, integrations, or behavior changes across multiple modules
-- If something goes sideways, stop and re-plan instead of pushing through with a broken approach.
-- Use planning for verification too, not only for implementation.
-- Write a concrete spec up front to reduce ambiguity.
+- Errors go to: Sentry, via `@sentry/node`. `src/observability/instrument.ts` is preloaded with `--import` by `dev:*`/`start:*` and initializes only when `SENTRY_DSN` is set (otherwise one "Sentry disabled" warn line on stderr). `captureError`/`withSentrySpan` in `src/observability/sentry.ts` are no-ops without a DSN; `beforeSend` runs `redact-sensitive.ts`. nitpickr itself sends nothing to PostHog.
+- Everything else: structured JSON logs on stdout/stderr from `src/logging/logger.ts` (with correlation ids), read from the API/worker container logs.
+- Read them with: the Sentry MCP or `sentry-cli` for the project behind the deployment's `SENTRY_DSN`; `docker compose logs api worker` for logs.
 
-## 2. Use Focused Parallelism
+## Linear
 
-- Keep the main context clean by splitting research, exploration, and parallel analysis into focused tracks when possible.
-- For complex problems, use more parallel investigation instead of overloading one execution path.
-- Keep one task per parallel work item so results stay easy to evaluate.
-
-## 3. Self-Improvement Loop
-
-- After any correction from the user, capture the lesson in `tasks/lessons.md`.
-- Write rules that prevent the same mistake from recurring.
-- Refine those lessons until the same class of mistake stops repeating.
-- Review relevant lessons at session start for this project.
-
-## 4. Verify Before Calling Work Done
-
-- Never mark a task complete without proving it works.
-- Compare behavior between `main` and the current changes when that comparison matters.
-- Ask: "Would a staff engineer approve this?"
-- Run tests, inspect logs, and demonstrate correctness.
-
-## 5. Demand Elegance, But Stay Practical
-
-- For non-trivial changes, pause and ask whether there is a more elegant solution.
-- If the current fix feels hacky, reframe the problem and implement the cleaner solution.
-- Do not over-engineer simple or obvious fixes.
-- Challenge your own solution before presenting it.
-
-## 6. Autonomous Bug Fixing
-
-- When given a bug report, fix it directly.
-- Start from logs, errors, failing tests, and concrete symptoms.
-- Minimize back-and-forth and unnecessary context switching for the user.
-- If CI or tests are failing, investigate and resolve them without waiting for extra prompting.
-
-## Task Management
-
-1. **Plan First**: write the task plan to `tasks/todo.md` with checkable items.
-2. **Verify Plan**: check in before implementation starts.
-3. **Track Progress**: mark items complete as you go.
-4. **Explain Changes**: provide a high-level summary at each major step.
-5. **Document Results**: add a review/results section to `tasks/todo.md`.
-6. **Capture Lessons**: update `tasks/lessons.md` after corrections.
-
-If `tasks/todo.md` or `tasks/lessons.md` do not exist yet, create them when the task warrants it.
-
-## Core Principles
-
-- **Simplicity First**: make every change as simple as possible and keep impact minimal.
-- **No Laziness**: find root causes, avoid temporary fixes, and hold the work to senior-engineer standards.
+- Project: none yet (team FRO).
+- Strict gitflow: `feature/fro-123-slug` (or `bugfix/`) from `develop`; PR title `FRO-123: summary`; PR into `develop`; releases to `main` are human-only.

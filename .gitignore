@@ -11,3 +11,10 @@ coverage
 .claude/worktrees/
 .claude/settings.local.json
 .worktrees/
+
+# Secrets and signing keys
+*.pem
+*.p8
+
+# hq gate receipts and stop-verify state (per machine)
+.hq/

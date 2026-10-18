@@ -1,8 +1,22 @@
+# Canonical Nitpickr config (hq baseline) plus this repo's ignore paths.
+version: 1
+triggers:
+  autoReview:
+    enabled: true
+    # Drafts are reviewed once marked ready, then on every push.
+    events:
+      - pull_request.ready_for_review
+      - pull_request.synchronize
 review:
   strictness: balanced
   maxComments: 20
-  focusAreas: []
-  # Eval fixtures are captured PR snapshots (data, not code under review).
+  focusAreas:
+    - correctness
+    - security
+    - tests or fixtures weakened to make checks pass
   ignorePaths:
+    - "**/Package.resolved"
+    - "**/pnpm-lock.yaml"
+    # Eval fixtures are captured PR snapshots (data, not code under review).
     - "tests/fixtures/**"
     - "website/**"
