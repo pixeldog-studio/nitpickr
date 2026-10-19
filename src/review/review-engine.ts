@@ -696,6 +696,7 @@ export interface ReviewEngineInput {
   changeRequest: {
     title: string;
     number: number;
+    body?: string | null;
   };
   files: Array<{
     path: string;

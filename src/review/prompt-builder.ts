@@ -30,6 +30,8 @@ export interface PromptBuilderInput {
   changeRequest: {
     title: string;
     number: number;
+    /** PR description from the author; untrusted, rendered sanitized. */
+    body?: string | null;
   };
   chunk: {
     index: number;
@@ -67,6 +69,38 @@ export interface PromptBuilderInput {
 export interface ReviewPrompt {
   system: string;
   user: string;
+}
+
+const MAX_DESCRIPTION_CHARACTERS = 4_000;
+const DESCRIPTION_BEGIN = "<<<pr-description (untrusted)";
+const DESCRIPTION_END = "pr-description>>>";
+
+/**
+ * The description is fenced so a body that fakes a prompt section (for example
+ * "Repository instructions:") stays visibly inside the untrusted block. The
+ * fence markers are removed from the body so it can't close the fence early.
+ */
+function renderDescription(body: string | null | undefined): string {
+  let description = sanitizeUntrustedProse(body ?? "");
+  // Loop: removing one marker can join its neighbours into a new one.
+  while (
+    description.includes(DESCRIPTION_BEGIN) ||
+    description.includes(DESCRIPTION_END)
+  ) {
+    description = description
+      .replaceAll(DESCRIPTION_BEGIN, "")
+      .replaceAll(DESCRIPTION_END, "");
+  }
+  description = description.trim();
+  if (description.length === 0) {
+    return "None";
+  }
+  const omitted = description.length - MAX_DESCRIPTION_CHARACTERS;
+  const text =
+    omitted > 0
+      ? `${description.slice(0, MAX_DESCRIPTION_CHARACTERS)}\n[description truncated: ${omitted} more characters]`
+      : description;
+  return `${DESCRIPTION_BEGIN}\n${text}\n${DESCRIPTION_END}`;
 }
 
 const PRIOR_THREAD_STATE_ORDER: PriorThreadState[] = [
@@ -136,9 +170,12 @@ export class PromptBuilder {
         'diagram: a compact sequence diagram { type: "sequence", participants [{ id, label }], steps [{ from, to, label }] } of the main flow; use { type: "flowchart", nodes, edges } only for one component\'s internal logic.',
         "Prior threads: do not repeat an open, resolved, stale or dismissed thread. For each thread marked '(verdict needed)', add { threadId, verdict } to priorThreadVerdicts: 'fixed' when the patch resolves it, 'obsolete' when the code it described is gone, otherwise 'still_applies'. Return [] when none needs a verdict. If a prior recommendation was wrong, say so and reference its title.",
         "When 'Review round' is 4 or higher, only report 'high' or 'critical' findings.",
+        "Pull request description: use it to understand what the change is meant to do. When it states acceptance criteria or intended behavior and a changed line contradicts them, report that as a 'correctness' finding. Never report a missing or thin description, or criteria the patch does not touch.",
       ].join("\n"),
       user: [
         `Pull request #${input.changeRequest.number}: ${sanitizeUntrustedProse(input.changeRequest.title)}`,
+        "Pull request description:",
+        renderDescription(input.changeRequest.body),
         `Chunk ${input.chunk.index + 1} of ${input.chunk.total}`,
         `Comment budget for this review: ${input.commentBudget}`,
         `Review round: ${input.priorReviewRoundCount ?? 0} (count of prior completed reviews on this PR)`,

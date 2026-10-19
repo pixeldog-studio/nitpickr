@@ -861,6 +861,40 @@ describe("GitHubAdapter", () => {
     expect(context.comments).toHaveLength(2);
   });
 
+  it("passes the pull request body through, and null when it is absent", async () => {
+    class BodyGitHubApiClient extends FakeGitHubApiClient {
+      constructor(private readonly body: string | null | undefined) {
+        super();
+      }
+
+      override async getPullRequest() {
+        return { ...(await super.getPullRequest()), body: this.body };
+      }
+    }
+    const load = (body: string | null | undefined) =>
+      new GitHubAdapter({
+        apiClient: new BodyGitHubApiClient(body),
+        appConfig: {
+          appId: 123456,
+          privateKey: "test",
+          webhookSecret: "super-secret",
+          webhookUrl: "https://nitpickr.example.com/webhooks/github",
+        },
+      }).fetchChangeRequestContext({
+        installationId: "123456",
+        repository: { owner: "rubenspessoa", name: "nitpickr" },
+        pullNumber: 42,
+        tenantId: "tenant_1",
+        repositoryId: "repo_1",
+      });
+
+    expect((await load("## Why\nFair queues")).pullRequestBody).toBe(
+      "## Why\nFair queues",
+    );
+    expect((await load(null)).pullRequestBody).toBeNull();
+    expect((await load(undefined)).pullRequestBody).toBeNull();
+  });
+
   it("loads latest-push delta files from the compare API", async () => {
     const adapter = new GitHubAdapter({
       apiClient: new FakeGitHubApiClient(),

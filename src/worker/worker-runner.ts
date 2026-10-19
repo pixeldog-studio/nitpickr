@@ -1941,6 +1941,7 @@ export class WorkerRunner {
                   changeRequest: {
                     title: context.changeRequest.title,
                     number: context.changeRequest.number,
+                    body: context.pullRequestBody ?? null,
                   },
                   files: reviewPlan.files.map((file) => {
                     const fileContent = fileContentsByPath.get(file.path);

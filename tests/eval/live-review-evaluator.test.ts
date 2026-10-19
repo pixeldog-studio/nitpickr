@@ -189,4 +189,38 @@ describe("LiveReviewEvaluator", () => {
     expect(fixtures[0]?.input.commentBudget).toBe(10);
     expect(fixtures[0]?.input.memory).toEqual([]);
   });
+  it("feeds a fixture's pull request body into the review prompt", async () => {
+    const prompts: string[] = [];
+    const model: ReviewModel = {
+      async generateStructuredReview(input) {
+        prompts.push(input.user);
+        return {
+          summary: "ok",
+          mermaid: "flowchart TD\nA --> B",
+          findings: [],
+        };
+      },
+    };
+    const withBody = liveEvaluationFixtureSchema.parse({
+      ...fixture,
+      input: {
+        ...fixture.input,
+        changeRequest: {
+          ...fixture.input.changeRequest,
+          body: "AC: pages hold 20 items",
+        },
+      },
+    });
+
+    await new LiveReviewEvaluator({
+      model,
+      usage: new UsageTracker(),
+      engineOptions: { requireEvidence: false },
+    }).evaluate([withBody]);
+
+    expect(withBody.input.changeRequest.body).toBe("AC: pages hold 20 items");
+    expect(
+      prompts.some((user) => user.includes("AC: pages hold 20 items")),
+    ).toBe(true);
+  });
 });
