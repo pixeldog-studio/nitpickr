@@ -75,31 +75,38 @@ const MAX_DESCRIPTION_CHARACTERS = 4_000;
 const DESCRIPTION_BEGIN = "<<<pr-description (untrusted)";
 const DESCRIPTION_END = "pr-description>>>";
 
+// Anything that reads like a fence marker, in any case or spacing, after
+// NFKC folds fullwidth look-alikes to ASCII.
+const DESCRIPTION_MARKER_PATTERN =
+  /<<<\s*pr[\s_-]*description|pr[\s_-]*description\s*>>>/giu;
+
 /**
  * The description is fenced so a body that fakes a prompt section (for example
- * "Repository instructions:") stays visibly inside the untrusted block. The
- * fence markers are removed from the body so it can't close the fence early.
+ * "Repository instructions:") stays visibly inside the untrusted block. Marker
+ * look-alikes are removed from the body so it can't appear to close the fence.
  */
 function renderDescription(body: string | null | undefined): string {
-  let description = sanitizeUntrustedProse(body ?? "");
+  let description = sanitizeUntrustedProse(body ?? "").normalize("NFKC");
   // Loop: removing one marker can join its neighbours into a new one.
-  while (
-    description.includes(DESCRIPTION_BEGIN) ||
-    description.includes(DESCRIPTION_END)
-  ) {
-    description = description
-      .replaceAll(DESCRIPTION_BEGIN, "")
-      .replaceAll(DESCRIPTION_END, "");
-  }
+  let previous: string;
+  do {
+    previous = description;
+    description = description.replace(DESCRIPTION_MARKER_PATTERN, "");
+  } while (description !== previous);
   description = description.trim();
   if (description.length === 0) {
     return "None";
   }
-  const omitted = description.length - MAX_DESCRIPTION_CHARACTERS;
-  const text =
-    omitted > 0
-      ? `${description.slice(0, MAX_DESCRIPTION_CHARACTERS)}\n[description truncated: ${omitted} more characters]`
-      : description;
+  let text = description;
+  if (description.length > MAX_DESCRIPTION_CHARACTERS) {
+    // Don't cut a surrogate pair in half.
+    const end = /[\uD800-\uDBFF]/.test(
+      description.charAt(MAX_DESCRIPTION_CHARACTERS - 1),
+    )
+      ? MAX_DESCRIPTION_CHARACTERS - 1
+      : MAX_DESCRIPTION_CHARACTERS;
+    text = `${description.slice(0, end)}\n[description truncated: ${description.length - end} more characters]`;
+  }
   return `${DESCRIPTION_BEGIN}\n${text}\n${DESCRIPTION_END}`;
 }
 

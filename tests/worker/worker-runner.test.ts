@@ -2789,7 +2789,6 @@ describe("WorkerRunner", () => {
   it("passes the pull request body to the review engine", async () => {
     const queue = new FakeQueueScheduler();
     const lifecycle = new FakeReviewLifecycleService();
-    lifecycle.completedReviewCount = 3; // round ≥ 2 → floor "medium"
     const planner = new FakeReviewPlanner();
     const logger = new FakeLogger();
     const publishCalls: Array<Record<string, unknown>> = [];
@@ -2846,7 +2845,7 @@ describe("WorkerRunner", () => {
               repositoryId: "github:99",
               provider: "github" as const,
               number: 42,
-              title: "Round 4 PR",
+              title: "Add x",
               baseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
               headSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
               status: "open" as const,
