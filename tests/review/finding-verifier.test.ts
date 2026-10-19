@@ -663,6 +663,9 @@ describe("review fixes from independent review", () => {
     expect(prompt.system).toContain(
       "Never refute a claim because the description says the behavior is intended",
     );
+    expect(prompt.system).toContain(
+      "never call it uncertain for that reason either",
+    );
     expect(buildVerifierPrompt(finding, file).user).toContain(
       "Pull request description:\nNone",
     );

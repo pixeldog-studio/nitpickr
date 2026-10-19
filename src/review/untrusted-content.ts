@@ -75,7 +75,7 @@ const DESCRIPTION_END = "pr-description>>>";
 // Anything that reads like a fence marker, in any case or spacing, after
 // NFKC folds fullwidth look-alikes to ASCII.
 const DESCRIPTION_MARKER_PATTERN =
-  /<<<\s*pr[\s_-]*description|pr[\s_-]*description\s*>>>/giu;
+  /<<<\s*pr[\s_\p{Pd}\u2212]*description|pr[\s_\p{Pd}\u2212]*description\s*>>>/giu;
 
 /**
  * The description is fenced so a body that fakes a prompt section (for example
@@ -85,7 +85,8 @@ const DESCRIPTION_MARKER_PATTERN =
 export function renderPullRequestDescription(
   body: string | null | undefined,
 ): string {
-  let description = sanitizeUntrustedProse(body ?? "").normalize("NFKC");
+  // NFKC first, so fullwidth look-alikes of `<!--` are stripped too.
+  let description = sanitizeUntrustedProse((body ?? "").normalize("NFKC"));
   // Loop: removing one marker can join its neighbours into a new one.
   let previous: string;
   do {
