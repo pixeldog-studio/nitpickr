@@ -1119,6 +1119,7 @@ export class ReviewEngine {
               finding,
               file,
               findRelatedCode({ finding, files: input.files }),
+              input.changeRequest.body,
             )
           : { verdict: "unverified" as const, reason: "not verified (cap)" };
       calls += file === undefined ? 0 : 1;
