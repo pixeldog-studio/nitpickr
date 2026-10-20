@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-import type { JobStore, QueueJob, QueueJobInput } from "./queue-scheduler.js";
+import type {
+  JobStore,
+  JobWriteGuard,
+  QueueJob,
+  QueueJobInput,
+} from "./queue-scheduler.js";
 
 const queueJobStatusSchema = z.enum([
   "queued",
@@ -153,6 +158,10 @@ export class PostgresJobStore implements JobStore {
   }
 
   async createJob(input: QueueJobInput): Promise<QueueJob> {
+    return this.#insertJob(input, 0);
+  }
+
+  async #insertJob(input: QueueJobInput, attempt: number): Promise<QueueJob> {
     const rows = await this.#client.unsafe<Record<string, unknown>>(
       `
         insert into jobs (
@@ -171,6 +180,8 @@ export class PostgresJobStore implements JobStore {
           scheduled_at
         )
         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13)
+        on conflict (dedupe_key) where status in ('queued', 'running')
+        do nothing
         returning *
       `,
       [
@@ -193,7 +204,22 @@ export class PostgresJobStore implements JobStore {
       ],
     );
 
-    return parseRow(rows[0] ?? {});
+    const created = rows[0];
+    if (created !== undefined) {
+      return parseRow(created);
+    }
+    // Another delivery enqueued the same work first (jobs_active_dedupe_idx).
+    const existing = await this.findActiveByDedupeKey(input.dedupeKey);
+    if (existing !== null) {
+      return existing;
+    }
+    // The holder finished between the conflict and the lookup: try once more.
+    if (attempt === 0) {
+      return this.#insertJob(input, 1);
+    }
+    throw new Error(
+      `Job ${input.dedupeKey} conflicted but no active job holds the key.`,
+    );
   }
 
   async listQueuedJobs(limit: number, dueBy: Date): Promise<QueueJob[]> {
@@ -245,7 +271,11 @@ export class PostgresJobStore implements JobStore {
     return rows.map(parseRow);
   }
 
-  async updateJob(jobId: string, patch: Partial<QueueJob>): Promise<QueueJob> {
+  async updateJob(
+    jobId: string,
+    patch: Partial<QueueJob>,
+    guard?: JobWriteGuard,
+  ): Promise<QueueJob> {
     assertNonEmpty(jobId, "jobId");
 
     const assignments: string[] = [];
@@ -283,17 +313,38 @@ export class PostgresJobStore implements JobStore {
     }
 
     params.push(jobId);
+    const idParam = params.length;
+    let statusClause = "";
+    if (guard !== undefined) {
+      params.push(guard.expectedStatus);
+      statusClause = ` and status = $${params.length}`;
+      if (guard.expectedWorkerId !== undefined) {
+        params.push(guard.expectedWorkerId);
+        statusClause += ` and worker_id = $${params.length}`;
+      }
+    }
     const rows = await this.#client.unsafe<Record<string, unknown>>(
       `
         update jobs
         set ${assignments.join(", ")}
-        where id = $${params.length}
+        where id = $${idParam}${statusClause}
         returning *
       `,
       params,
     );
 
-    return parseRow(rows[0] ?? {});
+    const row = rows[0];
+    if (row !== undefined) {
+      return parseRow(row);
+    }
+    if (guard !== undefined) {
+      // The job left `expectedStatus` meanwhile (requeued, canceled): keep it.
+      const current = await this.getJob(jobId);
+      if (current !== null) {
+        return current;
+      }
+    }
+    return parseRow({});
   }
 
   async cancelSupersededReviewJobs(input: {

@@ -50,6 +50,15 @@ export interface EnqueueJobInput {
   scheduledAt?: Date;
 }
 
+/**
+ * A write applies only while the job still has `expectedStatus` (and, when
+ * given, is still owned by `expectedWorkerId`); otherwise it is skipped.
+ */
+export interface JobWriteGuard {
+  expectedStatus: QueueJob["status"];
+  expectedWorkerId?: string;
+}
+
 export interface JobStore {
   getJob(jobId: string): Promise<QueueJob | null>;
   findActiveByDedupeKey(dedupeKey: string): Promise<QueueJob | null>;
@@ -62,7 +71,12 @@ export interface JobStore {
     workerId: string,
     startedAt: Date,
   ): Promise<QueueJob[]>;
-  updateJob(jobId: string, patch: Partial<QueueJob>): Promise<QueueJob>;
+  /** With a guard, a job that moved on is returned unchanged. */
+  updateJob(
+    jobId: string,
+    patch: Partial<QueueJob>,
+    guard?: JobWriteGuard,
+  ): Promise<QueueJob>;
   cancelSupersededReviewJobs(input: {
     repositoryId: string;
     changeRequestId: string;
@@ -256,13 +270,21 @@ export class QueueScheduler {
     });
   }
 
-  async completeJob(jobId: string): Promise<QueueJob> {
+  async completeJob(
+    jobId: string,
+    input: { workerId?: string } = {},
+  ): Promise<QueueJob> {
     assertNonEmpty(jobId, "jobId");
-    return this.#store.updateJob(jobId, {
-      status: "completed",
-      completedAt: this.#now(),
-      workerId: null,
-    });
+    // A job requeued or canceled while it ran must keep that state.
+    return this.#store.updateJob(
+      jobId,
+      {
+        status: "completed",
+        completedAt: this.#now(),
+        workerId: null,
+      },
+      runningGuard(input.workerId),
+    );
   }
 
   async failJob(
@@ -271,6 +293,8 @@ export class QueueScheduler {
     input: {
       retryable?: boolean;
     } = {},
+    /** The worker that ran the job; a job re-claimed by another is kept. */
+    owner: { workerId?: string } = {},
   ): Promise<QueueJob> {
     assertNonEmpty(jobId, "jobId");
     assertNonEmpty(errorMessage, "errorMessage");
@@ -283,13 +307,17 @@ export class QueueScheduler {
     const nextAttempts = current.attempts + 1;
 
     if (input.retryable === false || nextAttempts >= current.maxAttempts) {
-      return this.#store.updateJob(jobId, {
-        status: "failed",
-        attempts: nextAttempts,
-        completedAt: this.#now(),
-        workerId: null,
-        lastError: errorMessage,
-      });
+      return this.#store.updateJob(
+        jobId,
+        {
+          status: "failed",
+          attempts: nextAttempts,
+          completedAt: this.#now(),
+          workerId: null,
+          lastError: errorMessage,
+        },
+        runningGuard(owner.workerId),
+      );
     }
 
     // Exponential backoff: a struggling (often local, single-request) model
@@ -298,13 +326,24 @@ export class QueueScheduler {
       this.#retryBaseDelayMs * 2 ** (nextAttempts - 1),
       this.#maxRetryDelayMs,
     );
-    return this.#store.updateJob(jobId, {
-      status: "queued",
-      attempts: nextAttempts,
-      scheduledAt: new Date(this.#now().getTime() + retryDelayMs),
-      startedAt: null,
-      workerId: null,
-      lastError: errorMessage,
-    });
+    return this.#store.updateJob(
+      jobId,
+      {
+        status: "queued",
+        attempts: nextAttempts,
+        scheduledAt: new Date(this.#now().getTime() + retryDelayMs),
+        startedAt: null,
+        workerId: null,
+        lastError: errorMessage,
+      },
+      runningGuard(owner.workerId),
+    );
   }
+}
+
+/** Writes from the worker that ran a job apply only while it still runs it. */
+function runningGuard(workerId: string | undefined): JobWriteGuard {
+  return workerId === undefined
+    ? { expectedStatus: "running" }
+    : { expectedStatus: "running", expectedWorkerId: workerId };
 }
