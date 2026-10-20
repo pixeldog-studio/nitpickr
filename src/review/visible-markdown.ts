@@ -54,7 +54,13 @@ markdown.block.ruler.before(
     // Like markdown-it's paragraph rule: the definition runs on until a blank
     // line, the end of its container, or a line that starts another block.
     // After blank lines it continues while lines are indented by 4+.
-    const terminators = state.md.block.ruler.getRules("paragraph");
+    // cmark-gfm absorbs a table into a footnote, so a table doesn't end it.
+    const tableRule = state.md.block.ruler
+      .getRules("paragraph")
+      .find((rule) => rule.name === "table");
+    const terminators = state.md.block.ruler
+      .getRules("paragraph")
+      .filter((rule) => rule !== tableRule);
     const outside = (line: number) =>
       (state.sCount[line] ?? 0) < state.blkIndent;
     let next = startLine + 1;
@@ -139,7 +145,8 @@ function lastBlankLine(text: string): number {
     if (start === -1) {
       return -1;
     }
-    if (text.slice(start + 1, end).trim() === "" && end !== text.length) {
+    // Only spaces and tabs make a line blank, as in markdown-it.
+    if (/^[ \t]*$/.test(text.slice(start + 1, end)) && end !== text.length) {
       return start;
     }
     end = start;
