@@ -9,6 +9,7 @@ import {
   neutralizeMarkdown,
   revealInvisible,
   sanitizeUntrustedProse,
+  sanitizeUntrustedTitle,
 } from "./untrusted-content.js";
 
 /**
@@ -100,7 +101,7 @@ export function buildConversationMessages(
   });
 
   const user = [
-    `Pull request #${context.pullRequest.number}: ${sanitizeUntrustedProse(context.pullRequest.title)}`,
+    `Pull request #${context.pullRequest.number}: ${sanitizeUntrustedTitle(context.pullRequest.title)}`,
     "",
     "Repository instructions:",
     truncate(
@@ -116,7 +117,7 @@ export function buildConversationMessages(
     ...(context.thread
       ? [
           "The review comment this conversation is about:",
-          `${context.thread.path}:${context.thread.line} — ${sanitizeUntrustedProse(context.thread.title)}`,
+          `${context.thread.path}:${context.thread.line} — ${sanitizeUntrustedTitle(context.thread.title)}`,
           sanitizeUntrustedProse(context.thread.body),
           "",
         ]

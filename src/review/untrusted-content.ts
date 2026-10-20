@@ -42,6 +42,21 @@ export function sanitizeUntrustedProse(value: string): string {
 }
 
 /**
+ * PR and thread titles are plain text on GitHub, not Markdown, so they are
+ * not rendered (that would drop `Array<string>`); only HTML comments and
+ * invisible characters go.
+ */
+export function sanitizeUntrustedTitle(value: string): string {
+  let text = stripInvisible(value);
+  let previous: string;
+  do {
+    previous = text;
+    text = text.replace(/<!--[\s\S]*?-->/g, "");
+  } while (text !== previous);
+  return text;
+}
+
+/**
  * Model-written Markdown that is safe to post as nitpickr. The model echoes
  * PR content, so outside code it must not render raw HTML, embed images (an
  * auto-loaded image URL can carry prompt contents out) or @-mention people.

@@ -19,24 +19,102 @@ type ParentNode = DefaultTreeAdapterMap["parentNode"];
  */
 const markdown = new MarkdownIt({ html: true, linkify: false });
 
+// GFM's tagfilter: GitHub escapes these tags, so their text shows and any
+// comment inside them is still parsed (and hidden). Without this, parse5
+// would read their contents as raw text and expose the comment.
+const TAG_FILTER =
+  /<(\/?)(title|textarea|style|xmp|iframe|noembed|noframes|script|plaintext)(?=[\s/>]|$)/gi;
+for (const rule of ["html_block", "html_inline"] as const) {
+  markdown.renderer.rules[rule] = (tokens, index) =>
+    (tokens[index]?.content ?? "").replace(TAG_FILTER, "&lt;$1$2");
+}
+
+// GFM footnote definitions: GitHub drops unreferenced ones and moves the
+// rest to the end; drop them all (only a referenced note's text is lost).
+markdown.block.ruler.before(
+  "reference",
+  "footnote_definition",
+  (state, startLine, endLine, silent) => {
+    const start =
+      (state.bMarks[startLine] ?? 0) + (state.tShift[startLine] ?? 0);
+    const max = state.eMarks[startLine] ?? 0;
+    if (!/^\[\^[^\]\s]+\]:/.test(state.src.slice(start, max))) {
+      return false;
+    }
+    if (silent) {
+      return true;
+    }
+    // The definition runs on through lazy and indented continuation lines,
+    // up to a blank line that is not followed by an indented line.
+    let next = startLine + 1;
+    while (next < endLine) {
+      const lineStart = (state.bMarks[next] ?? 0) + (state.tShift[next] ?? 0);
+      const blank = lineStart >= (state.eMarks[next] ?? 0);
+      if (blank) {
+        const after = next + 1;
+        if (
+          after < endLine &&
+          (state.sCount[after] ?? 0) - state.blkIndent >= 4
+        ) {
+          next = after + 1;
+          continue;
+        }
+        break;
+      }
+      if (
+        /^\[\^[^\]\s]+\]:/.test(state.src.slice(lineStart, state.eMarks[next]))
+      ) {
+        break;
+      }
+      next += 1;
+    }
+    state.line = next;
+    return true;
+  },
+  { alt: ["paragraph", "reference", "blockquote", "list"] },
+);
+
 /**
- * Bounds that keep parsing fast on hostile input: markdown-it is quadratic on
- * a link definition followed by a huge run of spaces. Cutting the input can
- * only remove text (an opener left unclosed hides the rest), and collapsing
- * long space runs doesn't change what renders outside absurd indentation.
- * Prompts use at most a few thousand characters of any of these fields.
+ * Bounds that keep parsing fast on hostile input. markdown-it is quadratic on
+ * a link definition followed by a huge run of spaces; collapsing long runs
+ * doesn't change what renders outside absurd indentation. The length cap is
+ * GitHub's own limit for bodies and comments, so nothing GitHub renders is
+ * cut; anything longer is cut fail-closed (see below).
  */
-const MAX_INPUT_CHARACTERS = 32_768;
+const MAX_INPUT_CHARACTERS = 65_536;
 const MAX_SPACE_RUN = 64;
 
+/**
+ * Cutting can strand an opener whose close was past the cut, which would
+ * show text GitHub hides; drop from the earliest such opener.
+ */
+function cutFailClosed(value: string): string {
+  if (value.length <= MAX_INPUT_CHARACTERS) {
+    return value;
+  }
+  // Back off to the last blank line: no inline construct, link title or
+  // footnote spans one, so nothing hidden can straddle the cut.
+  const head = value.slice(0, MAX_INPUT_CHARACTERS);
+  const blank = head.search(/\n[ \t]*\n(?![\s\S]*\n[ \t]*\n)/);
+  const kept = blank === -1 ? head : head.slice(0, blank);
+  const comment = kept.lastIndexOf("<!--");
+  const cut =
+    comment !== -1 && !kept.includes("-->", comment) ? comment : kept.length;
+  const tail = kept.slice(0, cut);
+  const opener = tail.search(/<[!?/][^>]*$/);
+  return opener === -1 ? tail : tail.slice(0, opener);
+}
+
 export function visibleMarkdown(value: string): string {
-  const bounded = value
-    .slice(0, MAX_INPUT_CHARACTERS)
-    .replace(new RegExp(`[ \\t]{${MAX_SPACE_RUN + 1},}`, "g"), (run) =>
-      run.slice(0, MAX_SPACE_RUN),
-    );
+  const bounded = cutFailClosed(value).replace(
+    new RegExp(`[ \\t]{${MAX_SPACE_RUN + 1},}`, "g"),
+    (run) => run.slice(0, MAX_SPACE_RUN),
+  );
   const html = markdown.render(bounded);
-  const text = serialize(parseFragment(html).childNodes, 0);
+  const text = serialize(
+    parseFragment(html, { scriptingEnabled: false }).childNodes,
+    0,
+  );
   return text
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
@@ -50,14 +128,37 @@ function isParent(node: Node): node is ParentNode & Node {
 /** Deeper than this, structure is dropped and only visible text is kept. */
 const MAX_DEPTH = 100;
 
+/** Elements whose direct whitespace children are layout, not content. */
+const CONTAINERS = new Set([
+  "ul",
+  "ol",
+  "li",
+  "blockquote",
+  "table",
+  "thead",
+  "tbody",
+  "tfoot",
+  "tr",
+  "div",
+  "details",
+  "section",
+]);
+
 function children(node: Node, depth: number): string {
-  return isParent(node) ? serialize(node.childNodes, depth + 1) : "";
+  if (!isParent(node)) {
+    return "";
+  }
+  const container = "tagName" in node && CONTAINERS.has(node.tagName);
+  return serialize(node.childNodes, depth + 1, container);
 }
 
-function serialize(nodes: Node[], depth: number): string {
+function serialize(nodes: Node[], depth: number, inContainer = true): string {
   let out = "";
   for (const node of nodes) {
-    out += depth > MAX_DEPTH ? textOf(node) : serializeNode(node, depth);
+    out +=
+      depth > MAX_DEPTH
+        ? textOf(node)
+        : serializeNode(node, depth, inContainer);
   }
   return out;
 }
@@ -67,11 +168,19 @@ function block(text: string): string {
   return trimmed.length === 0 ? "" : `${trimmed}\n`;
 }
 
-function serializeNode(node: Node, depth: number): string {
+function serializeNode(
+  node: Node,
+  depth: number,
+  inContainer: boolean,
+): string {
   if (node.nodeName === "#text") {
     const value = "value" in node ? node.value : "";
-    // Layout whitespace between block elements (`</h2>\n<ul>`).
-    return /^\s*\n\s*$/.test(value) ? "" : value;
+    // Layout whitespace between block elements (`</h2>\n<ul>`) goes; between
+    // inline elements (`**a**\n**b**`) it is a soft break and stays.
+    if (/^\s*\n\s*$/.test(value)) {
+      return inContainer ? "" : "\n";
+    }
+    return value;
   }
   if (node.nodeName === "#comment" || !("tagName" in node)) {
     return "";
