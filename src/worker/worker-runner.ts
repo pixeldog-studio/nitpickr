@@ -1317,7 +1317,9 @@ export class WorkerRunner {
       jobLogger.warn("Skipped job for repository outside the allowlist.", {
         repository: disallowedRepository,
       });
-      await this.#queueScheduler.completeJob(job.id);
+      await this.#queueScheduler.completeJob(job.id, {
+        workerId: input.workerId,
+      });
       return true;
     }
 
@@ -1330,7 +1332,9 @@ export class WorkerRunner {
         await this.#processReviewJob(job, jobLogger);
       }
 
-      await this.#queueScheduler.completeJob(job.id);
+      await this.#queueScheduler.completeJob(job.id, {
+        workerId: input.workerId,
+      });
       jobLogger.info("Completed worker job.", {
         durationMs: Number(
           (process.hrtime.bigint() - jobStartedAt) / 1_000_000n,
@@ -1364,9 +1368,14 @@ export class WorkerRunner {
           correlationId: payloadCorrelationId ?? undefined,
         },
       });
-      await this.#queueScheduler.failJob(job.id, toErrorMessage(error), {
-        retryable,
-      });
+      await this.#queueScheduler.failJob(
+        job.id,
+        toErrorMessage(error),
+        {
+          retryable,
+        },
+        { workerId: input.workerId },
+      );
       return true;
     }
   }

@@ -288,6 +288,33 @@ export function buildMigrations(options: MigrationOptions = {}): string[] {
       primary key (repository_id, provider_comment_id)
     );
   `,
+    // At most one active job per dedupe key, so concurrent webhook deliveries
+    // can't both enqueue. Older duplicates are canceled first (keeping a
+    // running job, else the oldest) so the index can always be built.
+    `
+    update jobs
+    set status = 'canceled',
+        completed_at = now(),
+        last_error = 'Canceled: duplicate of an active job with the same dedupe key.'
+    where id in (
+      select id
+      from (
+        select id,
+               row_number() over (
+                 partition by dedupe_key
+                 order by (status = 'running') desc, created_at asc
+               ) as rank
+        from jobs
+        where status in ('queued', 'running')
+      ) ranked
+      where rank > 1
+    );
+  `,
+    `
+    create unique index if not exists jobs_active_dedupe_idx
+      on jobs (dedupe_key)
+      where status in ('queued', 'running');
+  `,
     // Job payloads used to be stored double-encoded (a jsonb string holding
     // JSON), so SQL could not read fields inside them. Unwrap them once.
     `
