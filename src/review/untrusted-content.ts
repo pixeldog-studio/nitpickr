@@ -102,8 +102,11 @@ const DESCRIPTION_MARKER_PATTERN =
 export function renderPullRequestDescription(
   body: string | null | undefined,
 ): string {
-  // NFKC first, so fullwidth look-alikes of `<!--` are stripped too.
-  let description = sanitizeUntrustedProse((body ?? "").normalize("NFKC"));
+  // Sanitize the raw body first (what GitHub hides), then again after NFKC,
+  // so fullwidth look-alikes can neither fake a close nor dodge the pass.
+  let description = sanitizeUntrustedProse(
+    sanitizeUntrustedProse(body ?? "").normalize("NFKC"),
+  );
   // Loop: removing one marker can join its neighbours into a new one.
   let previous: string;
   do {
