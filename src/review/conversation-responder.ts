@@ -7,8 +7,9 @@ import {
 } from "./finding-verifier.js";
 import {
   neutralizeMarkdown,
+  revealInvisible,
   sanitizeUntrustedProse,
-  stripInvisible,
+  sanitizeUntrustedTitle,
 } from "./untrusted-content.js";
 
 /**
@@ -94,13 +95,13 @@ export function buildConversationMessages(
     if (patchBudget <= 0 || file.patch === null) {
       return [];
     }
-    const patch = truncate(stripInvisible(file.patch), patchBudget);
+    const patch = truncate(revealInvisible(file.patch), patchBudget);
     patchBudget -= patch.length;
     return [`Path: ${file.path}\n${patch}`];
   });
 
   const user = [
-    `Pull request #${context.pullRequest.number}: ${sanitizeUntrustedProse(context.pullRequest.title)}`,
+    `Pull request #${context.pullRequest.number}: ${sanitizeUntrustedTitle(context.pullRequest.title)}`,
     "",
     "Repository instructions:",
     truncate(
@@ -116,7 +117,7 @@ export function buildConversationMessages(
     ...(context.thread
       ? [
           "The review comment this conversation is about:",
-          `${context.thread.path}:${context.thread.line} — ${sanitizeUntrustedProse(context.thread.title)}`,
+          `${context.thread.path}:${context.thread.line} — ${sanitizeUntrustedTitle(context.thread.title)}`,
           sanitizeUntrustedProse(context.thread.body),
           "",
         ]
@@ -125,7 +126,7 @@ export function buildConversationMessages(
       ? [
           `File at HEAD (${context.threadFile.path}, line numbers added):`,
           truncate(
-            numbered(stripInvisible(context.threadFile.content)),
+            numbered(revealInvisible(context.threadFile.content)),
             MAX_FILE_CHARACTERS,
           ),
           "",

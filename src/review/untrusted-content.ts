@@ -1,3 +1,5 @@
+import { visibleMarkdown } from "./visible-markdown.js";
+
 /**
  * PR titles, descriptions, comments and diffs are attacker-controlled: review
  * bots have been prompt-injected through them (CamoLeak, "Comment and
@@ -9,8 +11,6 @@
 // U+2060-U+2064, U+2066-U+2069, U+FEFF) and Unicode tag characters
 // (U+E0000-U+E007F), which render as nothing.
 const INVISIBLE_CHARACTERS = /[​-‏‪-‮⁠-⁤⁦-⁩﻿]|[\u{E0000}-\u{E007F}]/gu;
-
-const HTML_COMMENT = /<!--[\s\S]*?-->/g;
 
 /** Strip characters a human reviewer cannot see (for prose). */
 export function stripInvisible(value: string): string {
@@ -36,7 +36,24 @@ export function revealInvisible(value: string): string {
  * legitimate content.
  */
 export function sanitizeUntrustedProse(value: string): string {
-  return stripInvisible(value.replace(HTML_COMMENT, ""));
+  // Reduce to what GitHub shows first (the raw text is what it renders), then
+  // drop characters that render as nothing.
+  return stripInvisible(visibleMarkdown(value.replace(/\r\n?/g, "\n")));
+}
+
+/**
+ * PR and thread titles are plain text on GitHub, not Markdown, so they are
+ * not rendered (that would drop `Array<string>`); only HTML comments and
+ * invisible characters go.
+ */
+export function sanitizeUntrustedTitle(value: string): string {
+  let text = stripInvisible(value);
+  let previous: string;
+  do {
+    previous = text;
+    text = text.replace(/<!--[\s\S]*?-->/g, "");
+  } while (text !== previous);
+  return text;
 }
 
 /**
@@ -85,14 +102,29 @@ const DESCRIPTION_MARKER_PATTERN =
 export function renderPullRequestDescription(
   body: string | null | undefined,
 ): string {
-  // NFKC first, so fullwidth look-alikes of `<!--` are stripped too.
-  let description = sanitizeUntrustedProse((body ?? "").normalize("NFKC"));
-  // Loop: removing one marker can join its neighbours into a new one.
-  let previous: string;
+  // Sanitize the raw body first (what GitHub hides), then again after NFKC,
+  // so fullwidth look-alikes can neither fake a close nor dodge the pass.
+  let description = sanitizeUntrustedProse(
+    sanitizeUntrustedProse(body ?? "").normalize("NFKC"),
+  );
+  // Loop: removing a marker can join its neighbours into a new marker or new
+  // hidden markup, so strip both until nothing changes.
+  // Capped, since re-rendering serialized Markdown is not guaranteed to be
+  // exactly idempotent; markers are always removed last.
+  for (let pass = 0; pass < 4; pass += 1) {
+    const next = sanitizeUntrustedProse(
+      description.replace(DESCRIPTION_MARKER_PATTERN, ""),
+    );
+    if (next === description) {
+      break;
+    }
+    description = next;
+  }
+  let stripped: string;
   do {
-    previous = description;
+    stripped = description;
     description = description.replace(DESCRIPTION_MARKER_PATTERN, "");
-  } while (description !== previous);
+  } while (description !== stripped);
   description = description.trim();
   if (description.length === 0) {
     return "None";

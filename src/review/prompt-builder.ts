@@ -3,6 +3,7 @@ import {
   renderPullRequestDescription,
   revealInvisible,
   sanitizeUntrustedProse,
+  sanitizeUntrustedTitle,
   UNTRUSTED_CONTENT_RULE,
 } from "./untrusted-content.js";
 
@@ -142,7 +143,7 @@ export class PromptBuilder {
         "Pull request description: use it to understand what the change is meant to do. When it states acceptance criteria or intended behavior and a changed line contradicts them, report that as a 'correctness' finding. Never report a missing or thin description, or criteria the patch does not touch.",
       ].join("\n"),
       user: [
-        `Pull request #${input.changeRequest.number}: ${sanitizeUntrustedProse(input.changeRequest.title)}`,
+        `Pull request #${input.changeRequest.number}: ${sanitizeUntrustedTitle(input.changeRequest.title)}`,
         "Pull request description:",
         renderPullRequestDescription(input.changeRequest.body),
         `Chunk ${input.chunk.index + 1} of ${input.chunk.total}`,
@@ -157,7 +158,11 @@ export class PromptBuilder {
           ? "None"
           : input.memory
               .map((entry) =>
-                entry.path ? `${entry.path}: ${entry.summary}` : entry.summary,
+                sanitizeUntrustedProse(
+                  entry.path
+                    ? `${entry.path}: ${entry.summary}`
+                    : entry.summary,
+                ),
               )
               .join("\n"),
         "",
