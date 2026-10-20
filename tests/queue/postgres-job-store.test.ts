@@ -182,6 +182,59 @@ describe("PostgresJobStore", () => {
     expect(client.calls[0]?.query).toContain("where id = $");
   });
 
+  it("guards an update on the expected status and keeps a moved job", async () => {
+    const client = new FakePostgresClient();
+    client.queueResponse([]);
+    client.queueResponse([buildRow({ status: "queued" })]);
+    const store = new PostgresJobStore(client);
+
+    const result = await store.updateJob(
+      "job_1",
+      {
+        status: "completed",
+        completedAt: new Date("2026-03-09T10:06:00.000Z"),
+      },
+      { expectedStatus: "running" },
+    );
+
+    expect(client.calls[0]?.query).toMatch(/where id = \$3 and status = \$4/);
+    expect(client.calls[0]?.params?.slice(2)).toEqual(["job_1", "running"]);
+    expect(result.status).toBe("queued");
+  });
+
+  it("returns the active job when another delivery holds the dedupe key", async () => {
+    const client = new FakePostgresClient();
+    client.queueResponse([]);
+    client.queueResponse([buildRow({ id: "job_existing", status: "running" })]);
+    const store = new PostgresJobStore(client);
+
+    const created = await store.createJob({
+      id: "job_new",
+      type: "review_requested",
+      tenantId: "tenant_1",
+      repositoryId: "repo_1",
+      changeRequestId: "cr_1",
+      dedupeKey: "repo_1:cr_1:review",
+      priority: 100,
+      status: "queued",
+      attempts: 0,
+      maxAttempts: 3,
+      payload: {
+        headSha: "b".repeat(40),
+        trigger: "manual_command",
+        mode: "quick",
+      },
+      createdAt: new Date("2026-03-09T10:00:00.000Z"),
+      scheduledAt: new Date("2026-03-09T10:00:00.000Z"),
+    });
+
+    expect(client.calls[0]?.query).toContain(
+      "on conflict (dedupe_key) where status in ('queued', 'running')",
+    );
+    expect(client.calls[1]?.query).toContain("where dedupe_key = $1");
+    expect(created.id).toBe("job_existing");
+  });
+
   it("cancels superseded queued review jobs", async () => {
     const client = new FakePostgresClient();
     client.queueResponse([{ canceled_count: 2 }]);

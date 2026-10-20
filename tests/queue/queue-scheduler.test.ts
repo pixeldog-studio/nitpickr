@@ -81,10 +81,17 @@ class InMemoryJobStore implements JobStore {
     return claimed;
   }
 
-  async updateJob(jobId: string, patch: Partial<QueueJob>): Promise<QueueJob> {
+  async updateJob(
+    jobId: string,
+    patch: Partial<QueueJob>,
+    guard?: { expectedStatus: QueueJob["status"] },
+  ): Promise<QueueJob> {
     const current = this.jobs.get(jobId);
     if (!current) {
       throw new Error(`Unknown job ${jobId}`);
+    }
+    if (guard !== undefined && current.status !== guard.expectedStatus) {
+      return current;
     }
 
     const next = {
@@ -346,6 +353,28 @@ describe("QueueScheduler", () => {
     expect(completed.completedAt?.toISOString()).toBe(
       "2026-03-09T10:02:00.000Z",
     );
+  });
+
+  it("keeps a job that was requeued or canceled while it ran", async () => {
+    const store = new InMemoryJobStore();
+    await store.createJob(buildJobInput({ id: "requeued", status: "running" }));
+    await store.createJob(buildJobInput({ id: "canceled", status: "running" }));
+    // A heartbeat sweep requeued one and a supersede canceled the other.
+    await store.updateJob("requeued", { status: "queued", workerId: null });
+    await store.updateJob("canceled", { status: "canceled" });
+
+    const scheduler = new QueueScheduler(store, {
+      now: () => new Date("2026-03-09T10:02:00.000Z"),
+    });
+
+    expect((await scheduler.completeJob("requeued")).status).toBe("queued");
+    expect(
+      (await scheduler.failJob("canceled", "boom", { retryable: true })).status,
+    ).toBe("canceled");
+    expect(
+      (await scheduler.failJob("requeued", "boom", { retryable: false }))
+        .status,
+    ).toBe("queued");
   });
 
   it("requeues retryable failures and fails exhausted jobs", async () => {

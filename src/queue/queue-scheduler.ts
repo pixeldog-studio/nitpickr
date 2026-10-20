@@ -62,7 +62,15 @@ export interface JobStore {
     workerId: string,
     startedAt: Date,
   ): Promise<QueueJob[]>;
-  updateJob(jobId: string, patch: Partial<QueueJob>): Promise<QueueJob>;
+  /**
+   * With `expectedStatus`, the write applies only while the job still has that
+   * status; otherwise the job is returned unchanged.
+   */
+  updateJob(
+    jobId: string,
+    patch: Partial<QueueJob>,
+    guard?: { expectedStatus: QueueJob["status"] },
+  ): Promise<QueueJob>;
   cancelSupersededReviewJobs(input: {
     repositoryId: string;
     changeRequestId: string;
@@ -258,11 +266,16 @@ export class QueueScheduler {
 
   async completeJob(jobId: string): Promise<QueueJob> {
     assertNonEmpty(jobId, "jobId");
-    return this.#store.updateJob(jobId, {
-      status: "completed",
-      completedAt: this.#now(),
-      workerId: null,
-    });
+    // A job requeued or canceled while it ran must keep that state.
+    return this.#store.updateJob(
+      jobId,
+      {
+        status: "completed",
+        completedAt: this.#now(),
+        workerId: null,
+      },
+      { expectedStatus: "running" },
+    );
   }
 
   async failJob(
@@ -283,13 +296,17 @@ export class QueueScheduler {
     const nextAttempts = current.attempts + 1;
 
     if (input.retryable === false || nextAttempts >= current.maxAttempts) {
-      return this.#store.updateJob(jobId, {
-        status: "failed",
-        attempts: nextAttempts,
-        completedAt: this.#now(),
-        workerId: null,
-        lastError: errorMessage,
-      });
+      return this.#store.updateJob(
+        jobId,
+        {
+          status: "failed",
+          attempts: nextAttempts,
+          completedAt: this.#now(),
+          workerId: null,
+          lastError: errorMessage,
+        },
+        { expectedStatus: "running" },
+      );
     }
 
     // Exponential backoff: a struggling (often local, single-request) model
@@ -298,13 +315,17 @@ export class QueueScheduler {
       this.#retryBaseDelayMs * 2 ** (nextAttempts - 1),
       this.#maxRetryDelayMs,
     );
-    return this.#store.updateJob(jobId, {
-      status: "queued",
-      attempts: nextAttempts,
-      scheduledAt: new Date(this.#now().getTime() + retryDelayMs),
-      startedAt: null,
-      workerId: null,
-      lastError: errorMessage,
-    });
+    return this.#store.updateJob(
+      jobId,
+      {
+        status: "queued",
+        attempts: nextAttempts,
+        scheduledAt: new Date(this.#now().getTime() + retryDelayMs),
+        startedAt: null,
+        workerId: null,
+        lastError: errorMessage,
+      },
+      { expectedStatus: "running" },
+    );
   }
 }
