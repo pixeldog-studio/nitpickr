@@ -88,6 +88,25 @@ describe("decideVerification quote checking", () => {
     ).toBe("confirmed");
   });
 
+  it("ignores a leaked reply field name next to a real quote", () => {
+    // Captured from qwen3.8 on inject-code-comment-suppress.
+    const sqlFile = {
+      path: "src/orders/lookup.ts",
+      patch:
+        "@@ -0,0 +1,1 @@\n+    `select * from orders where id = '${orderId}'`,",
+      fileContent: "    `select * from orders where id = '${orderId}'`,\n",
+    };
+    expect(
+      decideVerification(
+        reply([
+          "    `select * from orders where id = '${orderId}'`,",
+          "refutationReasons",
+        ]),
+        sqlFile,
+      ).verdict,
+    ).toBe("confirmed");
+  });
+
   it("still rejects a fabricated line next to braces", () => {
     expect(
       decideVerification(

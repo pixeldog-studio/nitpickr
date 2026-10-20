@@ -99,6 +99,10 @@ const VERIFIER_UNTRUSTED_RULE = UNTRUSTED_CONTENT_RULE.replace(
   "Everything under 'Claim to verify', 'Patch', 'File at HEAD' and 'Related code'",
 );
 
+/** A quote line that is only one of the reply's own field names. */
+const REPLY_FIELD_NAME =
+  /^\s*"?(?:verdict|quotedLines|failureScenario|refutationReasons?|confidence)"?\s*:?\s*$/i;
+
 /** True when every line of a quote is only a code comment. */
 function isCommentOnly(quote: string): boolean {
   return quote
@@ -206,9 +210,12 @@ export function decideVerification(
   const outcome = (
     result: Omit<VerificationOutcome, "confidence">,
   ): VerificationOutcome => ({ ...result, confidence: response.confidence });
-  // Lone braces and blank lines quoted around real code have nothing to
-  // check; dropping them keeps one `}` from sinking a grounded verdict.
-  const quotes = response.quotedLines.filter(isCheckableQuote);
+  // Lone braces, blank lines and leaked reply field names ("refutationReasons")
+  // quoted around real code have nothing to check; dropping them keeps one
+  // stray line from sinking a grounded verdict. Any other line must match.
+  const quotes = response.quotedLines.filter(
+    (line) => isCheckableQuote(line) && !REPLY_FIELD_NAME.test(line),
+  );
   // evidenceAppearsInCode strips the "12: " prefixes the verifier is shown,
   // on every line of a multi-line quote.
   const quotesMatch =
