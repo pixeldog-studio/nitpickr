@@ -15,9 +15,22 @@ const INVISIBLE_CHARACTERS = /[​-‏‪-‮⁠-⁤⁦-⁩﻿]|[\u{E0000}-\u{E0
 // other `<!…>` "bogus comment", hidden inside HTML blocks; and link reference
 // definitions, including the `[//]: # (comment)` idiom.
 const HTML_COMMENT = /<!--[\s\S]*?-->/g;
-const OTHER_HIDDEN_MARKUP =
-  /<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<!(?!--)[^\s>][^>]*>|^ {0,3}\[[^\]\n]+\]:[ \t]*\S+(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?[ \t]*$/gm;
-const UNCLOSED_HIDDEN_MARKUP = /(?:<!--|<\?|<![^\s>])[\s\S]*$/;
+const OTHER_HIDDEN_MARKUP = new RegExp(
+  [
+    // Processing instructions and CDATA.
+    String.raw`<\?[\s\S]*?\?>`,
+    String.raw`<!\[CDATA\[[\s\S]*?\]\]>`,
+    // Bogus comments: `<!` not starting a comment, and `</` + non-letter.
+    String.raw`<!(?!--)[^>]*>`,
+    String.raw`<\/[^A-Za-z>][^>]*>`,
+    // Link reference definitions, also inside quotes and list items: a label
+    // (may span lines), a destination (may be on the next line) and an
+    // optional title (may span lines), each part escape-aware.
+    String.raw`^[ \t]*(?:(?:>|[-*+]|\d{1,9}[.)])[ \t]*)*\[(?:[^\]\\\n]|\\[\s\S]|\n(?![ \t]*\n))*\]:[ \t]*\n?[ \t]*(?:<(?:[^>\\\n]|\\.)*>|\S+)(?:[ \t]*\n?[ \t]*(?:"(?:[^"\\]|\\[\s\S])*"|'(?:[^'\\]|\\[\s\S])*'|\((?:[^)\\]|\\[\s\S])*\)))?[ \t]*$`,
+  ].join("|"),
+  "gm",
+);
+const UNCLOSED_HIDDEN_MARKUP = /(?:<!|<\?|<\/[^A-Za-z>])[\s\S]*$/;
 
 /** Strip characters a human reviewer cannot see (for prose). */
 export function stripInvisible(value: string): string {

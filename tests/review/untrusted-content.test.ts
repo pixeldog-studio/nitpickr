@@ -66,6 +66,30 @@ describe("sanitizeUntrustedProse", () => {
     );
   });
 
+  it("drops the link definition and bogus comment forms GitHub hides", () => {
+    const hidden = [
+      '[x]: /u\n"HIDDEN title"',
+      "[HIDDEN label]:\n/u",
+      "[HIDDEN a\\]b]: /u",
+      "[HIDDEN\nlabel]: /u",
+      '[x]: <HIDDEN a b> "t"',
+      '[x]: /u "HIDDEN \\" t"',
+      '[x]: /u "HIDDEN line1\nline2"',
+      '> [x]: /HIDDEN "HIDDEN title"',
+      '- [x]: /HIDDEN "HIDDEN title"',
+      "* [HIDDEN instructions here]: x",
+      "<div>\n<! HIDDEN text>\n</div>",
+      "<div>\n</ HIDDEN text>\n</div>",
+      "<div>\n</3HIDDEN>\n</div>",
+    ];
+    for (const input of hidden) {
+      expect(
+        sanitizeUntrustedProse(`before\n\n${input}\n\nafter`),
+      ).not.toContain("HIDDEN");
+    }
+    expect(sanitizeUntrustedProse("p\n\n[x]: /u\n\nafter")).toContain("after");
+  });
+
   it("keeps ordinary prose", () => {
     expect(sanitizeUntrustedProse("x < y and y --> z")).toBe(
       "x < y and y --> z",
