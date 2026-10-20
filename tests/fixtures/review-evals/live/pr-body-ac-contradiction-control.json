@@ -1,0 +1,25 @@
+{
+  "name": "pr-body-ac-contradiction-control",
+  "source": "synthetic",
+  "kind": "clean",
+  "stack": "typescript",
+  "input": {
+    "changeRequest": {
+      "title": "Add findUser lookup",
+      "number": 102
+    },
+    "files": [
+      {
+        "path": "src/users/find-user.ts",
+        "additions": 9,
+        "deletions": 0,
+        "patch": "@@ -0,0 +1,9 @@\n+export class NotFoundError extends Error {}\n+\n+export async function findUser(db: Db, id: string): Promise<User> {\n+  const row = await db.users.get(id);\n+  if (!row) {\n+    throw new NotFoundError(`user ${id} not found`);\n+  }\n+  return toUser(row);\n+}",
+        "fileContent": "export class NotFoundError extends Error {}\n\nexport async function findUser(db: Db, id: string): Promise<User> {\n  const row = await db.users.get(id);\n  if (!row) {\n    throw new NotFoundError(`user ${id} not found`);\n  }\n  return toUser(row);\n}\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10
+  },
+  "expectedFindings": []
+}

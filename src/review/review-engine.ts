@@ -64,6 +64,7 @@ const findingSchema = z.object({
       confidence: z.enum(["low", "medium", "high"]).optional(),
       reason: z.string(),
       failed: z.literal(true).optional(),
+      quotedLines: z.array(z.string()).optional(),
     })
     .optional(),
 });
@@ -696,6 +697,7 @@ export interface ReviewEngineInput {
   changeRequest: {
     title: string;
     number: number;
+    body?: string | null;
   };
   files: Array<{
     path: string;
@@ -1118,6 +1120,7 @@ export class ReviewEngine {
               finding,
               file,
               findRelatedCode({ finding, files: input.files }),
+              input.changeRequest.body,
             )
           : { verdict: "unverified" as const, reason: "not verified (cap)" };
       calls += file === undefined ? 0 : 1;
