@@ -69,6 +69,27 @@ const MIN_FRAGMENT_LENGTH = 3;
  * and treating `...`/`…` as an elision. Quotes that match nothing mean the
  * finding describes code that is not there.
  */
+/** The pieces of a quote long enough to check against the code. */
+function evidenceFragments(evidence: string): string[] {
+  return evidence
+    .replace(/^```[\w-]*\n?|```$/g, "")
+    .split("\n")
+    .map(normalizeCodeLine)
+    .filter((line) => line.length > 0 && !ELISION_LINE.test(line))
+    .flatMap((line) => line.split(INLINE_ELISION))
+    .map((fragment) => fragment.trim())
+    .filter((fragment) => fragment.length >= MIN_FRAGMENT_LENGTH);
+}
+
+/**
+ * False for a quote with nothing to check: a lone brace, a blank line or an
+ * elision. Verifiers quote those around real lines; they prove nothing either
+ * way, so they must neither support nor sink a verdict.
+ */
+export function isCheckableQuote(evidence: string): boolean {
+  return evidenceFragments(evidence).length > 0;
+}
+
 export function evidenceAppearsInCode(
   evidence: string,
   file: ScopedFile,
@@ -79,14 +100,7 @@ export function evidenceAppearsInCode(
     .filter((line) => line.length > 0);
   // Joined with spaces so a quote that merges two source lines still matches.
   const haystack = ` ${lines.join(" ")} `;
-  const fragments = evidence
-    .replace(/^```[\w-]*\n?|```$/g, "")
-    .split("\n")
-    .map(normalizeCodeLine)
-    .filter((line) => line.length > 0 && !ELISION_LINE.test(line))
-    .flatMap((line) => line.split(INLINE_ELISION))
-    .map((fragment) => fragment.trim())
-    .filter((fragment) => fragment.length >= MIN_FRAGMENT_LENGTH);
+  const fragments = evidenceFragments(evidence);
   return (
     fragments.length > 0 &&
     fragments.every((fragment) => haystack.includes(fragment))
