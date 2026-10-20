@@ -10,6 +10,7 @@ interface GitHubPullRequest {
   id: number;
   number: number;
   title: string;
+  body: string | null;
   state: "open" | "closed";
   draft: boolean;
   user: {

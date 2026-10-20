@@ -2785,4 +2785,175 @@ describe("WorkerRunner", () => {
       expect.arrayContaining(["low"]),
     );
   });
+
+  it("passes the pull request body to the review engine", async () => {
+    const queue = new FakeQueueScheduler();
+    const lifecycle = new FakeReviewLifecycleService();
+    const planner = new FakeReviewPlanner();
+    const logger = new FakeLogger();
+    const publishCalls: Array<Record<string, unknown>> = [];
+    let observedReviewInput:
+      | { changeRequest?: { body?: string | null } }
+      | undefined;
+
+    queue.nextJobs = [
+      {
+        id: "job_body",
+        type: "review_requested",
+        tenantId: "github-installation:123456",
+        repositoryId: "github:99",
+        changeRequestId: "github:99:42",
+        dedupeKey: "github:99:42:quick",
+        priority: 100,
+        status: "running",
+        attempts: 0,
+        maxAttempts: 3,
+        payload: {
+          installationId: "123456",
+          repository: { owner: "rubenspessoa", name: "nitpickr" },
+          pullNumber: 42,
+          mode: "quick",
+          trigger: {
+            type: "manual_command",
+            command: "review",
+            actorLogin: "ruben",
+          },
+        },
+        createdAt: new Date("2026-03-09T10:00:00.000Z"),
+        scheduledAt: new Date("2026-03-09T10:00:00.000Z"),
+        startedAt: new Date("2026-03-09T10:00:01.000Z"),
+        completedAt: null,
+        workerId: "worker_1",
+        lastError: null,
+      },
+    ];
+
+    const runner = new WorkerRunner({
+      logger,
+      queueScheduler: queue,
+      githubAdapter: {
+        async fetchChangeRequestContext() {
+          return {
+            tenantId: "github-installation:123456",
+            installationId: "123456",
+            repositoryId: "github:99",
+            repository: { owner: "rubenspessoa", name: "nitpickr" },
+            changeRequest: {
+              id: "github:99:42",
+              tenantId: "github-installation:123456",
+              installationId: "123456",
+              repositoryId: "github:99",
+              provider: "github" as const,
+              number: 42,
+              title: "Add x",
+              baseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              headSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              status: "open" as const,
+              authorLogin: "ruben",
+            },
+            pullRequestBody: "## Acceptance criteria\n- x is 1",
+            files: [
+              {
+                path: "src/x.ts",
+                additions: 1,
+                deletions: 0,
+                status: "modified" as const,
+                patch: "@@ -1 +1 @@\n+x",
+                previousPath: null,
+              },
+            ],
+            comments: [],
+          };
+        },
+      },
+      instructionBundleLoader: {
+        async loadForReview() {
+          return {
+            config: {
+              ...testRepositoryConfig,
+              review: {
+                ...testRepositoryConfig.review,
+                maxComments: 10,
+                maxAutoComments: 10,
+              },
+            },
+            documents: [],
+            combinedText: "",
+          };
+        },
+      },
+      memoryService: {
+        async getRelevantMemories() {
+          return [];
+        },
+        async ingestDiscussion() {
+          return { acknowledgments: [], savedEntries: [] };
+        },
+      },
+      reviewPlanner: planner,
+      reviewLifecycle: lifecycle,
+      reviewEngine: {
+        async review(input) {
+          observedReviewInput = input as {
+            changeRequest?: { body?: string | null };
+          };
+          return {
+            summary: "summary",
+            mermaid: "flowchart TD\nA --> B",
+            findings: [
+              {
+                path: "src/x.ts",
+                line: 1,
+                findingType: "safe_suggestion",
+                severity: "low",
+                category: "style",
+                title: "nit",
+                body: "minor",
+                fixPrompt: "fix at src/x.ts:1",
+              },
+              {
+                path: "src/x.ts",
+                line: 2,
+                findingType: "bug",
+                severity: "high",
+                category: "correctness",
+                title: "real bug",
+                body: "important",
+                fixPrompt: "fix at src/x.ts:2",
+              },
+            ],
+          };
+        },
+      },
+      publisher: {
+        buildInlineComments() {
+          return [];
+        },
+        async publish(input) {
+          publishCalls.push({ type: "publish", ...input });
+          return { reviewId: "review_body" };
+        },
+      },
+      statusPublisher: {
+        async markPending() {
+          return "check-run-body";
+        },
+        async markPublished() {},
+        async markSkipped() {},
+        async markFailed() {
+          return undefined;
+        },
+      },
+    });
+
+    const processed = await runner.runOnce({
+      workerId: "worker_1",
+      perTenantCap: 1,
+    });
+
+    expect(processed).toBe(true);
+    expect(observedReviewInput?.changeRequest?.body).toBe(
+      "## Acceptance criteria\n- x is 1",
+    );
+  });
 });

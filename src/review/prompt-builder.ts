@@ -1,5 +1,6 @@
 import { renderReviewLenses } from "./review-lenses.js";
 import {
+  renderPullRequestDescription,
   revealInvisible,
   sanitizeUntrustedProse,
   UNTRUSTED_CONTENT_RULE,
@@ -30,6 +31,8 @@ export interface PromptBuilderInput {
   changeRequest: {
     title: string;
     number: number;
+    /** PR description from the author; untrusted, rendered sanitized. */
+    body?: string | null;
   };
   chunk: {
     index: number;
@@ -136,9 +139,12 @@ export class PromptBuilder {
         'diagram: a compact sequence diagram { type: "sequence", participants [{ id, label }], steps [{ from, to, label }] } of the main flow; use { type: "flowchart", nodes, edges } only for one component\'s internal logic.',
         "Prior threads: do not repeat an open, resolved, stale or dismissed thread. For each thread marked '(verdict needed)', add { threadId, verdict } to priorThreadVerdicts: 'fixed' when the patch resolves it, 'obsolete' when the code it described is gone, otherwise 'still_applies'. Return [] when none needs a verdict. If a prior recommendation was wrong, say so and reference its title.",
         "When 'Review round' is 4 or higher, only report 'high' or 'critical' findings.",
+        "Pull request description: use it to understand what the change is meant to do. When it states acceptance criteria or intended behavior and a changed line contradicts them, report that as a 'correctness' finding. Never report a missing or thin description, or criteria the patch does not touch.",
       ].join("\n"),
       user: [
         `Pull request #${input.changeRequest.number}: ${sanitizeUntrustedProse(input.changeRequest.title)}`,
+        "Pull request description:",
+        renderPullRequestDescription(input.changeRequest.body),
         `Chunk ${input.chunk.index + 1} of ${input.chunk.total}`,
         `Comment budget for this review: ${input.commentBudget}`,
         `Review round: ${input.priorReviewRoundCount ?? 0} (count of prior completed reviews on this PR)`,

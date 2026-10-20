@@ -19,6 +19,7 @@ const pullRequestSchema = z.object({
   id: z.number().int().positive(),
   number: z.number().int().positive(),
   title: z.string().min(1),
+  body: z.string().nullable().optional(),
   state: z.enum(["open", "closed"]),
   draft: z.boolean(),
   user: z.object({
@@ -359,6 +360,8 @@ export interface GitHubChangeRequestContext {
     name: string;
   };
   changeRequest: ReturnType<typeof parseChangeRequest>;
+  /** PR description as written by the author: untrusted, not persisted. */
+  pullRequestBody?: string | null;
   files: Array<{
     path: string;
     status: "added" | "modified" | "removed" | "renamed";
@@ -949,6 +952,7 @@ export class GitHubAdapter {
               : "open",
         authorLogin: pullRequest.user.login,
       }),
+      pullRequestBody: pullRequest.body ?? null,
       files: files.map((file) => ({
         path: file.filename,
         status: file.status,

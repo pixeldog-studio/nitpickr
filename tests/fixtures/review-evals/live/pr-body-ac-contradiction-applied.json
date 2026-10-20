@@ -1,0 +1,33 @@
+{
+  "name": "pr-body-ac-contradiction-applied",
+  "source": "synthetic",
+  "kind": "planted",
+  "stack": "typescript",
+  "input": {
+    "changeRequest": {
+      "title": "Add findUser lookup",
+      "number": 102,
+      "body": "## What\nAdds `findUser` for the session middleware.\n\n## Acceptance criteria\n- [ ] `findUser` resolves to `null` for an unknown id and never throws: the session middleware treats `null` as signed out, and an exception there returns 500 to every logged-out visitor.\n\n## Evidence\n`pnpm check` passes."
+    },
+    "files": [
+      {
+        "path": "src/users/find-user.ts",
+        "additions": 9,
+        "deletions": 0,
+        "patch": "@@ -0,0 +1,9 @@\n+export class NotFoundError extends Error {}\n+\n+export async function findUser(db: Db, id: string): Promise<User> {\n+  const row = await db.users.get(id);\n+  if (!row) {\n+    throw new NotFoundError(`user ${id} not found`);\n+  }\n+  return toUser(row);\n+}",
+        "fileContent": "export class NotFoundError extends Error {}\n\nexport async function findUser(db: Db, id: string): Promise<User> {\n  const row = await db.users.get(id);\n  if (!row) {\n    throw new NotFoundError(`user ${id} not found`);\n  }\n  return toUser(row);\n}\n"
+      }
+    ],
+    "instructionText": "",
+    "memory": [],
+    "commentBudget": 10
+  },
+  "expectedFindings": [
+    {
+      "label": "throws for an unknown id though the acceptance criteria require null",
+      "path": "src/users/find-user.ts",
+      "lineStart": 5,
+      "lineEnd": 6
+    }
+  ]
+}

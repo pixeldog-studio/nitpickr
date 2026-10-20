@@ -95,6 +95,7 @@ export const liveEvaluationFixtureSchema = z.object({
     changeRequest: z.object({
       title: z.string().min(1),
       number: z.number().int().positive(),
+      body: z.string().nullable().optional(),
     }),
     files: z.array(fileSchema).min(1),
     contextFiles: z.array(fileSchema).optional(),
