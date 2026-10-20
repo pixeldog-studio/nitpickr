@@ -31,42 +31,59 @@ for (const rule of ["html_block", "html_inline"] as const) {
 
 // GFM footnote definitions: GitHub drops unreferenced ones and moves the
 // rest to the end; drop them all (only a referenced note's text is lost).
+const FOOTNOTE_LABEL = /^\[\^[^\]\s]+\]:/;
+
 markdown.block.ruler.before(
   "reference",
   "footnote_definition",
   (state, startLine, endLine, silent) => {
-    const start =
-      (state.bMarks[startLine] ?? 0) + (state.tShift[startLine] ?? 0);
-    const max = state.eMarks[startLine] ?? 0;
-    if (!/^\[\^[^\]\s]+\]:/.test(state.src.slice(start, max))) {
+    if ((state.sCount[startLine] ?? 0) - state.blkIndent >= 4) {
+      return false;
+    }
+    const lineText = (line: number) =>
+      state.src.slice(
+        (state.bMarks[line] ?? 0) + (state.tShift[line] ?? 0),
+        state.eMarks[line] ?? 0,
+      );
+    if (!FOOTNOTE_LABEL.test(lineText(startLine))) {
       return false;
     }
     if (silent) {
       return true;
     }
-    // The definition runs on through lazy and indented continuation lines,
-    // up to a blank line that is not followed by an indented line.
+    // Like markdown-it's paragraph rule: the definition runs on until a blank
+    // line, the end of its container, or a line that starts another block.
+    // After blank lines it continues while lines are indented by 4+.
+    const terminators = state.md.block.ruler.getRules("paragraph");
+    const outside = (line: number) =>
+      (state.sCount[line] ?? 0) < state.blkIndent;
     let next = startLine + 1;
-    while (next < endLine) {
-      const lineStart = (state.bMarks[next] ?? 0) + (state.tShift[next] ?? 0);
-      const blank = lineStart >= (state.eMarks[next] ?? 0);
-      if (blank) {
-        const after = next + 1;
+    for (;;) {
+      while (next < endLine && !state.isEmpty(next) && !outside(next)) {
+        const indented = (state.sCount[next] ?? 0) - state.blkIndent >= 4;
         if (
-          after < endLine &&
-          (state.sCount[after] ?? 0) - state.blkIndent >= 4
+          !indented &&
+          terminators.some((rule) => rule(state, next, endLine, true))
         ) {
-          next = after + 1;
-          continue;
+          state.line = next;
+          return true;
         }
-        break;
+        next += 1;
+      }
+      let after = next;
+      while (after < endLine && state.isEmpty(after)) {
+        after += 1;
       }
       if (
-        /^\[\^[^\]\s]+\]:/.test(state.src.slice(lineStart, state.eMarks[next]))
+        after > next &&
+        after < endLine &&
+        !outside(after) &&
+        (state.sCount[after] ?? 0) - state.blkIndent >= 4
       ) {
-        break;
+        next = after;
+        continue;
       }
-      next += 1;
+      break;
     }
     state.line = next;
     return true;
@@ -92,17 +109,40 @@ function cutFailClosed(value: string): string {
   if (value.length <= MAX_INPUT_CHARACTERS) {
     return value;
   }
-  // Back off to the last blank line: no inline construct, link title or
-  // footnote spans one, so nothing hidden can straddle the cut.
+  // Back off to the last blank line: no inline construct, link title,
+  // attribute or footnote spans one, so nothing hidden can straddle the cut.
+  // Without one, nothing past the cap is trusted.
   const head = value.slice(0, MAX_INPUT_CHARACTERS);
-  const blank = head.search(/\n[ \t]*\n(?![\s\S]*\n[ \t]*\n)/);
-  const kept = blank === -1 ? head : head.slice(0, blank);
+  const blank = lastBlankLine(head);
+  if (blank === -1) {
+    return "";
+  }
+  const kept = head.slice(0, blank);
   const comment = kept.lastIndexOf("<!--");
-  const cut =
-    comment !== -1 && !kept.includes("-->", comment) ? comment : kept.length;
-  const tail = kept.slice(0, cut);
-  const opener = tail.search(/<[!?/][^>]*$/);
-  return opener === -1 ? tail : tail.slice(0, opener);
+  const tail =
+    comment !== -1 && !kept.includes("-->", comment)
+      ? kept.slice(0, comment)
+      : kept;
+  // An opener after the last `>` is stranded; drop from the first one.
+  const after = tail.lastIndexOf(">") + 1;
+  const opener = tail.slice(after).search(/<[!?/]/);
+  return opener === -1 ? tail : tail.slice(0, after + opener);
+}
+
+/** Offset of the newline ending the last non-blank line before a blank one. */
+function lastBlankLine(text: string): number {
+  let end = text.length;
+  while (end > 0) {
+    const start = text.lastIndexOf("\n", end - 1);
+    if (start === -1) {
+      return -1;
+    }
+    if (text.slice(start + 1, end).trim() === "" && end !== text.length) {
+      return start;
+    }
+    end = start;
+  }
+  return -1;
 }
 
 export function visibleMarkdown(value: string): string {
