@@ -10,7 +10,12 @@
 // (U+E0000-U+E007F), which render as nothing.
 const INVISIBLE_CHARACTERS = /[​-‏‪-‮⁠-⁤⁦-⁩﻿]|[\u{E0000}-\u{E007F}]/gu;
 
-const HTML_COMMENT = /<!--[\s\S]*?-->/g;
+// Raw HTML that GitHub renders as nothing: comments, and (as CommonMark raw
+// HTML that the HTML parser turns into comments) processing instructions,
+// declarations and CDATA sections.
+const HIDDEN_MARKUP =
+  /<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<![A-Za-z][^>]*>/g;
+const UNCLOSED_HIDDEN_MARKUP = /(?:<!--|<\?|<!\[CDATA\[|<![A-Za-z])[\s\S]*$/;
 
 /** Strip characters a human reviewer cannot see (for prose). */
 export function stripInvisible(value: string): string {
@@ -36,24 +41,24 @@ export function revealInvisible(value: string): string {
  * legitimate content.
  */
 export function sanitizeUntrustedProse(value: string): string {
-  // Comments are removed twice: on the raw text, which is what GitHub hides
-  // (so `-\u200b->` can't fake a close and expose hidden lines), and after
-  // stripping invisible characters (so `<!\u200b--` can't dodge the pass).
-  return removeHtmlComments(stripInvisible(removeHtmlComments(value)));
+  // Hidden markup is removed twice: on the raw text, which is what GitHub
+  // hides (so `-\u200b->` can't fake a close and expose hidden lines), and
+  // after stripping invisible characters (so `<!\u200b--` can't dodge it).
+  return removeHiddenMarkup(stripInvisible(removeHiddenMarkup(value)));
 }
 
-function removeHtmlComments(value: string): string {
-  // Loop: removing one comment can join a new one.
+function removeHiddenMarkup(value: string): string {
+  // Loop: removing one piece can join a new one.
   let text = value;
   let previous: string;
   do {
     previous = text;
-    text = text.replace(HTML_COMMENT, "");
+    text = text.replace(HIDDEN_MARKUP, "");
   } while (text !== previous);
-  // An unclosed `<!--` at a line start hides the rest of the text on GitHub.
-  // Drop everything from a leftover `<!--` to the end: losing a quoted `<!--`
-  // beats passing on text a reader can't see.
-  return text.replace(/<!--[\s\S]*$/, "");
+  // An unclosed opener at a line start hides the rest of the text on GitHub.
+  // Drop everything from a leftover opener to the end: losing a quoted `<!--`
+  // or `<?` beats passing on text a reader can't see.
+  return text.replace(UNCLOSED_HIDDEN_MARKUP, "");
 }
 
 /**
@@ -107,11 +112,14 @@ export function renderPullRequestDescription(
   let description = sanitizeUntrustedProse(
     sanitizeUntrustedProse(body ?? "").normalize("NFKC"),
   );
-  // Loop: removing one marker can join its neighbours into a new one.
+  // Loop: removing a marker can join its neighbours into a new marker or new
+  // hidden markup, so strip both until nothing changes.
   let previous: string;
   do {
     previous = description;
-    description = description.replace(DESCRIPTION_MARKER_PATTERN, "");
+    description = sanitizeUntrustedProse(
+      description.replace(DESCRIPTION_MARKER_PATTERN, ""),
+    );
   } while (description !== previous);
   description = description.trim();
   if (description.length === 0) {

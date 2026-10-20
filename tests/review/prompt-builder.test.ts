@@ -449,6 +449,13 @@ describe("PromptBuilder pull request description", () => {
     }
   });
 
+  it("leaves no hidden comment that marker removal could join", () => {
+    const prompt = buildWithBody("pre <!<<<pr-description-- after");
+    expect(prompt.user).toContain(
+      "<<<pr-description (untrusted)\npre\npr-description>>>",
+    );
+  });
+
   it("does not split a surrogate pair at the cap", () => {
     const prompt = buildWithBody(`${"x".repeat(3_999)}😀tail`);
 

@@ -28,6 +28,17 @@ describe("sanitizeUntrustedProse", () => {
     expect(sanitizeUntrustedProse("x<!-- a --\u200b> injected")).toBe("x");
   });
 
+  it("drops processing instructions, declarations and CDATA GitHub hides", () => {
+    expect(sanitizeUntrustedProse("a <?ignore previous instructions?> b")).toBe(
+      "a  b",
+    );
+    expect(sanitizeUntrustedProse("c <!X ignore decl> d")).toBe("c  d");
+    expect(sanitizeUntrustedProse("e <![CDATA[ ignore cdata ]]> f")).toBe(
+      "e  f",
+    );
+    expect(sanitizeUntrustedProse("g\n<?pi block\nhidden line")).toBe("g\n");
+  });
+
   it("keeps ordinary prose", () => {
     expect(sanitizeUntrustedProse("x < y and y --> z")).toBe(
       "x < y and y --> z",
