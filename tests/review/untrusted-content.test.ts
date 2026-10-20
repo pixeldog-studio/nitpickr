@@ -165,6 +165,13 @@ describe("sanitizeUntrustedProse", () => {
     expect(sanitizeUntrustedProse("[^x]: hidden\n# Heading visible")).toBe(
       "# Heading visible",
     );
+    // Lazy continuation lines inside containers stay part of the definition.
+    expect(sanitizeUntrustedProse("> [^1]: x\nlazy LEAK text\n\nafter")).toBe(
+      "after",
+    );
+    expect(sanitizeUntrustedProse("- [^1]: x\nlazy LEAK text\n\nafter")).toBe(
+      "after",
+    );
   });
 
   it("drops what straddles the cut when no blank line precedes it", () => {

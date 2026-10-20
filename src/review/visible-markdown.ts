@@ -59,7 +59,9 @@ markdown.block.ruler.before(
       (state.sCount[line] ?? 0) < state.blkIndent;
     let next = startLine + 1;
     for (;;) {
-      while (next < endLine && !state.isEmpty(next) && !outside(next)) {
+      // Lazy continuation lines (even below the container's indent) belong to
+      // the definition, as they do to a paragraph; the container bounds endLine.
+      while (next < endLine && !state.isEmpty(next)) {
         const indented = (state.sCount[next] ?? 0) - state.blkIndent >= 4;
         if (
           !indented &&
