@@ -5,7 +5,11 @@ import {
   toResponseSchema,
 } from "../shared/chat-completion-client.js";
 import { ModelServerStalledError } from "../shared/model-output.js";
-import { evidenceAppearsInCode, type Severity } from "./evidence-gate.js";
+import {
+  evidenceAppearsInCode,
+  isCheckableQuote,
+  type Severity,
+} from "./evidence-gate.js";
 import type { RelatedSnippet } from "./related-code.js";
 import {
   revealInvisible,
@@ -86,12 +90,18 @@ export interface VerificationOutcome {
    * either way, but it must not open the inline gate.
    */
   failed?: true;
+  /** The lines the verifier quoted, for eval reports and debugging. */
+  quotedLines?: string[];
 }
 
 const VERIFIER_UNTRUSTED_RULE = UNTRUSTED_CONTENT_RULE.replace(
   "Everything under 'Pull request', 'Changed files' and 'Prior nitpickr threads'",
   "Everything under 'Claim to verify', 'Patch', 'File at HEAD' and 'Related code'",
 );
+
+/** A quote line that is only one of the reply's own field names. */
+const REPLY_FIELD_NAME =
+  /^\s*"?(?:verdict|quotedLines|failureScenario|refutationReasons?|confidence)"?\s*:?\s*$/i;
 
 /** True when every line of a quote is only a code comment. */
 function isCommentOnly(quote: string): boolean {
@@ -200,7 +210,12 @@ export function decideVerification(
   const outcome = (
     result: Omit<VerificationOutcome, "confidence">,
   ): VerificationOutcome => ({ ...result, confidence: response.confidence });
-  const quotes = response.quotedLines.filter((line) => line.trim().length > 0);
+  // Lone braces, blank lines and leaked reply field names ("refutationReasons")
+  // quoted around real code have nothing to check; dropping them keeps one
+  // stray line from sinking a grounded verdict. Any other line must match.
+  const quotes = response.quotedLines.filter(
+    (line) => isCheckableQuote(line) && !REPLY_FIELD_NAME.test(line),
+  );
   // evidenceAppearsInCode strips the "12: " prefixes the verifier is shown,
   // on every line of a multi-line quote.
   const quotesMatch =
@@ -262,7 +277,11 @@ export async function verifyFinding(
       ...buildVerifierPrompt(finding, file, related),
       jsonSchema: verifierResponseJsonSchema,
     });
-    return decideVerification(reply, file);
+    const outcome = decideVerification(reply, file);
+    const parsed = verifierResponseSchema.safeParse(reply);
+    return parsed.success
+      ? { ...outcome, quotedLines: parsed.data.quotedLines }
+      : outcome;
   } catch (error) {
     // A stuck model server fails every later call too: stop the review now
     // instead of waiting out the watch once per finding.

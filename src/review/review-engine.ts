@@ -64,6 +64,7 @@ const findingSchema = z.object({
       confidence: z.enum(["low", "medium", "high"]).optional(),
       reason: z.string(),
       failed: z.literal(true).optional(),
+      quotedLines: z.array(z.string()).optional(),
     })
     .optional(),
 });

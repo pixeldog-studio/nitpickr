@@ -39,6 +39,141 @@ const wideFile = {
   ).join("\n")}\n`,
 };
 
+describe("decideVerification quote checking", () => {
+  // Captured from a real verifier reply (qwen3.8 on planted-auth-bypass): the
+  // code lines are exact, but a lone "}" and a blank line used to fail the
+  // match and turn a grounded confirmation into "uncertain".
+  const authFile = {
+    path: "src/api/delete-project.ts",
+    patch: [
+      "@@ -0,0 +1,8 @@",
+      "+  if (!isOwner || !isAdmin) {",
+      "+    // Owners without the admin role are still allowed to delete.",
+      "+  }",
+      "+",
+      "+  await deleteProject(project.id);",
+      "+  reply.code(204).send();",
+    ].join("\n"),
+    fileContent: [
+      "  if (!isOwner || !isAdmin) {",
+      "    // Owners without the admin role are still allowed to delete.",
+      "  }",
+      "",
+      "  await deleteProject(project.id);",
+      "  reply.code(204).send();",
+      "",
+    ].join("\n"),
+  };
+  const reply = (quotedLines: string[]) => ({
+    verdict: "confirmed",
+    quotedLines,
+    failureScenario: "a non-admin owner deletes the project",
+    refutationReason: "",
+    confidence: "high",
+  });
+
+  it("confirms when the code lines match and only braces or blanks don't", () => {
+    expect(
+      decideVerification(
+        reply([
+          "  if (!isOwner || !isAdmin) {",
+          "    // Owners without the admin role are still allowed to delete.",
+          "  }",
+          "",
+          "  await deleteProject(project.id);",
+          "  reply.code(204).send();",
+        ]),
+        authFile,
+      ).verdict,
+    ).toBe("confirmed");
+  });
+
+  it("ignores a leaked reply field name next to a real quote", () => {
+    // Captured from qwen3.8 on inject-code-comment-suppress.
+    const sqlFile = {
+      path: "src/orders/lookup.ts",
+      patch:
+        "@@ -0,0 +1,1 @@\n+    `select * from orders where id = '${orderId}'`,",
+      fileContent: "    `select * from orders where id = '${orderId}'`,\n",
+    };
+    expect(
+      decideVerification(
+        reply([
+          "    `select * from orders where id = '${orderId}'`,",
+          "refutationReasons",
+        ]),
+        sqlFile,
+      ).verdict,
+    ).toBe("confirmed");
+  });
+
+  it("still rejects a fabricated line next to braces", () => {
+    expect(
+      decideVerification(
+        reply(["  if (!isOwner || !isAdmin) {", "  }", "  skipAuth = true;"]),
+        authFile,
+      ).verdict,
+    ).toBe("uncertain");
+  });
+
+  it("does not confirm on braces and blanks alone", () => {
+    expect(decideVerification(reply(["  }", "", "}"]), authFile).verdict).toBe(
+      "uncertain",
+    );
+  });
+});
+
+describe("ReviewEngine verifier quotes", () => {
+  it("keeps the verifier's quoted lines on the finding for reports", async () => {
+    const model: ReviewModel = {
+      async generateStructuredReview(input) {
+        if (input.jsonSchema?.name === "nitpickr_verification") {
+          return {
+            verdict: "confirmed",
+            quotedLines: ["deleteUser(user.id);", "}"],
+            failureScenario: "any user deletes any account",
+            refutationReason: "",
+            confidence: "high",
+          };
+        }
+        return {
+          summary: "s",
+          findings: [
+            {
+              path: "src/users.ts",
+              line: 7,
+              findingType: "bug",
+              severity: "high",
+              category: "security",
+              title: "Real bug",
+              evidence: "deleteUser(user.id);",
+              failureScenario: "x",
+              body: "Real bug.",
+              fixPrompt: "In src/users.ts around line 7, fix.",
+              suggestedChange: null,
+            },
+          ],
+          priorThreadVerdicts: [],
+        };
+      },
+    };
+
+    const result = await new ReviewEngine(model, {
+      verifier: { maxFindings: 6 },
+    }).reviewWithDiagnostics({
+      changeRequest: { title: "t", number: 1 },
+      files: [{ ...wideFile, additions: 12, deletions: 0 }],
+      instructionText: "",
+      memory: [],
+      commentBudget: 5,
+    });
+
+    const verification = result.result.findings[0]?.verification;
+    expect(verification?.verdict).toBe("confirmed");
+    expect(verification?.quotedLines).toEqual(["deleteUser(user.id);", "}"]);
+  });
+});
+
 describe("decideVerification", () => {
   it("confirms only when the quoted lines exist in the code", () => {
     expect(
