@@ -10,12 +10,14 @@
 // (U+E0000-U+E007F), which render as nothing.
 const INVISIBLE_CHARACTERS = /[​-‏‪-‮⁠-⁤⁦-⁩﻿]|[\u{E0000}-\u{E007F}]/gu;
 
-// Raw HTML that GitHub renders as nothing: comments, and (as CommonMark raw
-// HTML that the HTML parser turns into comments) processing instructions,
-// declarations and CDATA sections.
-const HIDDEN_MARKUP =
-  /<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<![A-Za-z][^>]*>/g;
-const UNCLOSED_HIDDEN_MARKUP = /(?:<!--|<\?|<!\[CDATA\[|<![A-Za-z])[\s\S]*$/;
+// Markup that GitHub renders as nothing: comments; processing instructions,
+// declarations and CDATA (which the HTML parser turns into comments); any
+// other `<!…>` "bogus comment", hidden inside HTML blocks; and link reference
+// definitions, including the `[//]: # (comment)` idiom.
+const HTML_COMMENT = /<!--[\s\S]*?-->/g;
+const OTHER_HIDDEN_MARKUP =
+  /<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<!(?!--)[^\s>][^>]*>|^ {0,3}\[[^\]\n]+\]:[ \t]*\S+(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?[ \t]*$/gm;
+const UNCLOSED_HIDDEN_MARKUP = /(?:<!--|<\?|<![^\s>])[\s\S]*$/;
 
 /** Strip characters a human reviewer cannot see (for prose). */
 export function stripInvisible(value: string): string {
@@ -53,7 +55,12 @@ function removeHiddenMarkup(value: string): string {
   let previous: string;
   do {
     previous = text;
-    text = text.replace(HIDDEN_MARKUP, "");
+    // Comments first, so another pattern can't start inside one and expose
+    // its tail.
+    text = text.replace(HTML_COMMENT, "");
+    if (text === previous) {
+      text = text.replace(OTHER_HIDDEN_MARKUP, "");
+    }
   } while (text !== previous);
   // An unclosed opener at a line start hides the rest of the text on GitHub.
   // Drop everything from a leftover opener to the end: losing a quoted `<!--`

@@ -39,6 +39,33 @@ describe("sanitizeUntrustedProse", () => {
     expect(sanitizeUntrustedProse("g\n<?pi block\nhidden line")).toBe("g\n");
   });
 
+  it("drops bogus comments GitHub hides inside HTML blocks", () => {
+    expect(sanitizeUntrustedProse("<div>\n<!1 secret one>\n</div>")).toBe(
+      "<div>\n\n</div>",
+    );
+    expect(
+      sanitizeUntrustedProse("<div>\nhi <!- secret A> there\n</div>"),
+    ).toBe("<div>\nhi  there\n</div>");
+    expect(sanitizeUntrustedProse("<div>\n<![if x] secret B>\n</div>")).toBe(
+      "<div>\n\n</div>",
+    );
+    expect(sanitizeUntrustedProse("<div>\n<!1 secret H\n\nnext para")).toBe(
+      "<div>\n",
+    );
+  });
+
+  it("drops link reference definitions, including the comment idiom", () => {
+    expect(sanitizeUntrustedProse("a\n[//]: # (secret four)\nb")).toBe(
+      "a\n\nb",
+    );
+    expect(sanitizeUntrustedProse('a\n[x]: http://x "secret G"\nb')).toBe(
+      "a\n\nb",
+    );
+    expect(sanitizeUntrustedProse("See [docs][x] for more.")).toBe(
+      "See [docs][x] for more.",
+    );
+  });
+
   it("keeps ordinary prose", () => {
     expect(sanitizeUntrustedProse("x < y and y --> z")).toBe(
       "x < y and y --> z",
