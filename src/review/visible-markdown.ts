@@ -31,7 +31,19 @@ for (const rule of ["html_block", "html_inline"] as const) {
 
 // GFM footnote definitions: GitHub drops unreferenced ones and moves the
 // rest to the end; drop them all (only a referenced note's text is lost).
-const FOOTNOTE_LABEL = /^\[\^[^\]\s]+\]:/;
+// Only ASCII space, tab and line breaks end a label (cmark-gfm); Unicode
+// spaces such as NBSP don't, so `\s` would miss hidden definitions.
+const FOOTNOTE_LABEL = /^\[\^[^\] \t\r\n]+\]:/;
+
+// The footnote rule relies on finding markdown-it's table rule by name; fail
+// loudly on a markdown-it upgrade that renames it.
+if (
+  !new MarkdownIt().block.ruler
+    .getRules("paragraph")
+    .some((rule) => rule.name === "table")
+) {
+  throw new Error("markdown-it no longer exposes a 'table' block rule");
+}
 
 markdown.block.ruler.before(
   "reference",
@@ -117,8 +129,9 @@ function cutFailClosed(value: string): string {
   if (value.length <= MAX_INPUT_CHARACTERS) {
     return value;
   }
-  // Back off to the last blank line: no inline construct, link title,
-  // attribute or footnote spans one, so nothing hidden can straddle the cut.
+  // Back off to the last blank line: no inline construct, link title or
+  // attribute spans one, and a footnote that continues past it is still
+  // parsed (and dropped) from the kept text, so nothing hidden straddles it.
   // Without one, nothing past the cap is trusted.
   const head = value.slice(0, MAX_INPUT_CHARACTERS);
   const blank = lastBlankLine(head);

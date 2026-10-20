@@ -173,6 +173,21 @@ describe("sanitizeUntrustedProse", () => {
     ]) {
       expect(sanitizeUntrustedProse(input)).toBe("after");
     }
+    // Unicode spaces don't end a footnote label on GitHub.
+    for (const space of [
+      "\u00A0",
+      "\u3000",
+      "\u2003",
+      "\u000B",
+      "\u000C",
+      "\u2028",
+      "\uFEFF",
+    ]) {
+      expect(
+        sanitizeUntrustedProse(`[^a${space}b]: SECRET words\n\nafter`),
+      ).toBe("after");
+    }
+    expect(sanitizeUntrustedProse("[^\u00A0]: SECRET\n\nafter")).toBe("after");
     // Lazy continuation lines inside containers stay part of the definition.
     expect(sanitizeUntrustedProse("> [^1]: x\nlazy LEAK text\n\nafter")).toBe(
       "after",
