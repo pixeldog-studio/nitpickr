@@ -36,16 +36,23 @@ export function revealInvisible(value: string): string {
  * legitimate content.
  */
 export function sanitizeUntrustedProse(value: string): string {
-  // Invisible characters first, so `<!\u200b--` can't dodge the comment
-  // pass; then loop, since removing one comment can join a new one.
-  let text = stripInvisible(value);
+  // Comments are removed twice: on the raw text, which is what GitHub hides
+  // (so `-\u200b->` can't fake a close and expose hidden lines), and after
+  // stripping invisible characters (so `<!\u200b--` can't dodge the pass).
+  return removeHtmlComments(stripInvisible(removeHtmlComments(value)));
+}
+
+function removeHtmlComments(value: string): string {
+  // Loop: removing one comment can join a new one.
+  let text = value;
   let previous: string;
   do {
     previous = text;
     text = text.replace(HTML_COMMENT, "");
   } while (text !== previous);
   // An unclosed `<!--` at a line start hides the rest of the text on GitHub.
-  // Drop any trailing one: losing a quoted `<!--` beats hiding text.
+  // Drop everything from a leftover `<!--` to the end: losing a quoted `<!--`
+  // beats passing on text a reader can't see.
   return text.replace(/<!--[\s\S]*$/, "");
 }
 
