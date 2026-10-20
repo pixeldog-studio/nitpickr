@@ -44,7 +44,8 @@ export function sanitizeUntrustedProse(value: string): string {
     previous = text;
     text = text.replace(HTML_COMMENT, "");
   } while (text !== previous);
-  return text;
+  // GitHub hides an unclosed comment to the end of the text.
+  return text.replace(/<!--[\s\S]*$/, "");
 }
 
 /**
