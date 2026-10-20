@@ -50,6 +50,15 @@ export interface EnqueueJobInput {
   scheduledAt?: Date;
 }
 
+/**
+ * A write applies only while the job still has `expectedStatus` (and, when
+ * given, is still owned by `expectedWorkerId`); otherwise it is skipped.
+ */
+export interface JobWriteGuard {
+  expectedStatus: QueueJob["status"];
+  expectedWorkerId?: string;
+}
+
 export interface JobStore {
   getJob(jobId: string): Promise<QueueJob | null>;
   findActiveByDedupeKey(dedupeKey: string): Promise<QueueJob | null>;
@@ -62,14 +71,11 @@ export interface JobStore {
     workerId: string,
     startedAt: Date,
   ): Promise<QueueJob[]>;
-  /**
-   * With `expectedStatus`, the write applies only while the job still has that
-   * status; otherwise the job is returned unchanged.
-   */
+  /** With a guard, a job that moved on is returned unchanged. */
   updateJob(
     jobId: string,
     patch: Partial<QueueJob>,
-    guard?: { expectedStatus: QueueJob["status"] },
+    guard?: JobWriteGuard,
   ): Promise<QueueJob>;
   cancelSupersededReviewJobs(input: {
     repositoryId: string;
@@ -264,7 +270,10 @@ export class QueueScheduler {
     });
   }
 
-  async completeJob(jobId: string): Promise<QueueJob> {
+  async completeJob(
+    jobId: string,
+    input: { workerId?: string } = {},
+  ): Promise<QueueJob> {
     assertNonEmpty(jobId, "jobId");
     // A job requeued or canceled while it ran must keep that state.
     return this.#store.updateJob(
@@ -274,7 +283,7 @@ export class QueueScheduler {
         completedAt: this.#now(),
         workerId: null,
       },
-      { expectedStatus: "running" },
+      runningGuard(input.workerId),
     );
   }
 
@@ -284,6 +293,8 @@ export class QueueScheduler {
     input: {
       retryable?: boolean;
     } = {},
+    /** The worker that ran the job; a job re-claimed by another is kept. */
+    owner: { workerId?: string } = {},
   ): Promise<QueueJob> {
     assertNonEmpty(jobId, "jobId");
     assertNonEmpty(errorMessage, "errorMessage");
@@ -305,7 +316,7 @@ export class QueueScheduler {
           workerId: null,
           lastError: errorMessage,
         },
-        { expectedStatus: "running" },
+        runningGuard(owner.workerId),
       );
     }
 
@@ -325,7 +336,14 @@ export class QueueScheduler {
         workerId: null,
         lastError: errorMessage,
       },
-      { expectedStatus: "running" },
+      runningGuard(owner.workerId),
     );
   }
+}
+
+/** Writes from the worker that ran a job apply only while it still runs it. */
+function runningGuard(workerId: string | undefined): JobWriteGuard {
+  return workerId === undefined
+    ? { expectedStatus: "running" }
+    : { expectedStatus: "running", expectedWorkerId: workerId };
 }

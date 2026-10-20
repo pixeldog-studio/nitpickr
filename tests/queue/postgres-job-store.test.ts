@@ -235,6 +235,60 @@ describe("PostgresJobStore", () => {
     expect(created.id).toBe("job_existing");
   });
 
+  it("also guards on the owning worker when given", async () => {
+    const client = new FakePostgresClient();
+    client.queueResponse([buildRow({ status: "completed" })]);
+    const store = new PostgresJobStore(client);
+
+    await store.updateJob(
+      "job_1",
+      { status: "completed" },
+      { expectedStatus: "running", expectedWorkerId: "worker_a" },
+    );
+
+    expect(client.calls[0]?.query).toMatch(
+      /where id = \$2 and status = \$3 and worker_id = \$4/,
+    );
+    expect(client.calls[0]?.params?.slice(1)).toEqual([
+      "job_1",
+      "running",
+      "worker_a",
+    ]);
+  });
+
+  it("retries the insert once when the key holder finished meanwhile", async () => {
+    const client = new FakePostgresClient();
+    client.queueResponse([]);
+    client.queueResponse([]);
+    client.queueResponse([buildRow({ id: "job_new" })]);
+    const store = new PostgresJobStore(client);
+
+    const created = await store.createJob({
+      id: "job_new",
+      type: "review_requested",
+      tenantId: "tenant_1",
+      repositoryId: "repo_1",
+      changeRequestId: "cr_1",
+      dedupeKey: "repo_1:cr_1:review",
+      priority: 100,
+      status: "queued",
+      attempts: 0,
+      maxAttempts: 3,
+      payload: {
+        headSha: "b".repeat(40),
+        trigger: "manual_command",
+        mode: "quick",
+      },
+      createdAt: new Date("2026-03-09T10:00:00.000Z"),
+      scheduledAt: new Date("2026-03-09T10:00:00.000Z"),
+    });
+
+    expect(
+      client.calls.map((call) => call.query.trim().split(/\s+/)[0]),
+    ).toEqual(["insert", "select", "insert"]);
+    expect(created.id).toBe("job_new");
+  });
+
   it("cancels superseded queued review jobs", async () => {
     const client = new FakePostgresClient();
     client.queueResponse([{ canceled_count: 2 }]);
