@@ -44,7 +44,8 @@ export function sanitizeUntrustedProse(value: string): string {
     previous = text;
     text = text.replace(HTML_COMMENT, "");
   } while (text !== previous);
-  // GitHub hides an unclosed comment to the end of the text.
+  // An unclosed `<!--` at a line start hides the rest of the text on GitHub.
+  // Drop any trailing one: losing a quoted `<!--` beats hiding text.
   return text.replace(/<!--[\s\S]*$/, "");
 }
 
