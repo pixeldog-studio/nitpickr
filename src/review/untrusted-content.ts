@@ -1,3 +1,5 @@
+import { visibleMarkdown } from "./visible-markdown.js";
+
 /**
  * PR titles, descriptions, comments and diffs are attacker-controlled: review
  * bots have been prompt-injected through them (CamoLeak, "Comment and
@@ -9,28 +11,6 @@
 // U+2060-U+2064, U+2066-U+2069, U+FEFF) and Unicode tag characters
 // (U+E0000-U+E007F), which render as nothing.
 const INVISIBLE_CHARACTERS = /[​-‏‪-‮⁠-⁤⁦-⁩﻿]|[\u{E0000}-\u{E007F}]/gu;
-
-// Markup that GitHub renders as nothing: comments; processing instructions,
-// declarations and CDATA (which the HTML parser turns into comments); any
-// other `<!…>` "bogus comment", hidden inside HTML blocks; and link reference
-// definitions, including the `[//]: # (comment)` idiom.
-const HTML_COMMENT = /<!--[\s\S]*?-->/g;
-const OTHER_HIDDEN_MARKUP = new RegExp(
-  [
-    // Processing instructions and CDATA.
-    String.raw`<\?[\s\S]*?\?>`,
-    String.raw`<!\[CDATA\[[\s\S]*?\]\]>`,
-    // Bogus comments: `<!` not starting a comment, and `</` + non-letter.
-    String.raw`<!(?!--)[^>]*>`,
-    String.raw`<\/[^A-Za-z>][^>]*>`,
-    // Link reference definitions, also inside quotes and list items: a label
-    // (may span lines), a destination (may be on the next line) and an
-    // optional title (may span lines), each part escape-aware.
-    String.raw`^[ \t]*(?:(?:>|[-*+]|\d{1,9}[.)])[ \t]*)*\[(?:[^\]\\\n]|\\[\s\S]|\n(?![ \t]*\n))*\]:[ \t]*\n?[ \t]*(?:<(?:[^>\\\n]|\\.)*>|\S+)(?:[ \t]*\n?[ \t]*(?:"(?:[^"\\]|\\[\s\S])*"|'(?:[^'\\]|\\[\s\S])*'|\((?:[^)\\]|\\[\s\S])*\)))?[ \t]*$`,
-  ].join("|"),
-  "gm",
-);
-const UNCLOSED_HIDDEN_MARKUP = /(?:<!|<\?|<\/[^A-Za-z>])[\s\S]*$/;
 
 /** Strip characters a human reviewer cannot see (for prose). */
 export function stripInvisible(value: string): string {
@@ -56,29 +36,9 @@ export function revealInvisible(value: string): string {
  * legitimate content.
  */
 export function sanitizeUntrustedProse(value: string): string {
-  // Hidden markup is removed twice: on the raw text, which is what GitHub
-  // hides (so `-\u200b->` can't fake a close and expose hidden lines), and
-  // after stripping invisible characters (so `<!\u200b--` can't dodge it).
-  return removeHiddenMarkup(stripInvisible(removeHiddenMarkup(value)));
-}
-
-function removeHiddenMarkup(value: string): string {
-  // Loop: removing one piece can join a new one.
-  let text = value;
-  let previous: string;
-  do {
-    previous = text;
-    // Comments first, so another pattern can't start inside one and expose
-    // its tail.
-    text = text.replace(HTML_COMMENT, "");
-    if (text === previous) {
-      text = text.replace(OTHER_HIDDEN_MARKUP, "");
-    }
-  } while (text !== previous);
-  // An unclosed opener at a line start hides the rest of the text on GitHub.
-  // Drop everything from a leftover opener to the end: losing a quoted `<!--`
-  // or `<?` beats passing on text a reader can't see.
-  return text.replace(UNCLOSED_HIDDEN_MARKUP, "");
+  // Reduce to what GitHub shows first (the raw text is what it renders), then
+  // drop characters that render as nothing.
+  return stripInvisible(visibleMarkdown(value.replace(/\r\n?/g, "\n")));
 }
 
 /**
@@ -134,13 +94,22 @@ export function renderPullRequestDescription(
   );
   // Loop: removing a marker can join its neighbours into a new marker or new
   // hidden markup, so strip both until nothing changes.
-  let previous: string;
-  do {
-    previous = description;
-    description = sanitizeUntrustedProse(
+  // Capped, since re-rendering serialized Markdown is not guaranteed to be
+  // exactly idempotent; markers are always removed last.
+  for (let pass = 0; pass < 4; pass += 1) {
+    const next = sanitizeUntrustedProse(
       description.replace(DESCRIPTION_MARKER_PATTERN, ""),
     );
-  } while (description !== previous);
+    if (next === description) {
+      break;
+    }
+    description = next;
+  }
+  let stripped: string;
+  do {
+    stripped = description;
+    description = description.replace(DESCRIPTION_MARKER_PATTERN, "");
+  } while (description !== stripped);
   description = description.trim();
   if (description.length === 0) {
     return "None";
