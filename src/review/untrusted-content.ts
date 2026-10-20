@@ -36,7 +36,15 @@ export function revealInvisible(value: string): string {
  * legitimate content.
  */
 export function sanitizeUntrustedProse(value: string): string {
-  return stripInvisible(value.replace(HTML_COMMENT, ""));
+  // Invisible characters first, so `<!\u200b--` can't dodge the comment
+  // pass; then loop, since removing one comment can join a new one.
+  let text = stripInvisible(value);
+  let previous: string;
+  do {
+    previous = text;
+    text = text.replace(HTML_COMMENT, "");
+  } while (text !== previous);
+  return text;
 }
 
 /**

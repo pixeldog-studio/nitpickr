@@ -109,3 +109,24 @@ describe("answer safety", () => {
     expect(answer).toContain("const a = b<c>;");
   });
 });
+
+describe("buildConversationMessages code context", () => {
+  it("shows bidi characters in patches and files instead of deleting them", () => {
+    const [, user] = buildConversationMessages({
+      ...context,
+      threadFile: {
+        path: "src/users.ts",
+        content: "const isAdmin = false;\u202e // }\u2066if (isAdmin)\u2069",
+      },
+      changedFiles: [
+        {
+          path: "src/users.ts",
+          patch: "@@ -1 +1 @@\n+const isAdmin = false;\u202e // }",
+        },
+      ],
+    });
+    expect(user?.content).toContain("const isAdmin = false;<U+202E> // }");
+    expect(user?.content).toContain("<U+2066>if (isAdmin)<U+2069>");
+    expect(user?.content).not.toContain("\u202e");
+  });
+});

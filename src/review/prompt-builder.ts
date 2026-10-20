@@ -151,7 +151,11 @@ export class PromptBuilder {
           ? "None"
           : input.memory
               .map((entry) =>
-                entry.path ? `${entry.path}: ${entry.summary}` : entry.summary,
+                sanitizeUntrustedProse(
+                  entry.path
+                    ? `${entry.path}: ${entry.summary}`
+                    : entry.summary,
+                ),
               )
               .join("\n"),
         "",
