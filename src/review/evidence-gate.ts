@@ -63,12 +63,6 @@ const INLINE_ELISION = /\.\.\.|…/;
 /** Shorter pieces match too easily to count as evidence. */
 const MIN_FRAGMENT_LENGTH = 3;
 
-/**
- * True when every quoted fragment appears in the patch or the file at HEAD,
- * ignoring diff markers, line-number prefixes, whitespace and line breaks,
- * and treating `...`/`…` as an elision. Quotes that match nothing mean the
- * finding describes code that is not there.
- */
 /** The pieces of a quote long enough to check against the code. */
 function evidenceFragments(evidence: string): string[] {
   return evidence
@@ -90,6 +84,12 @@ export function isCheckableQuote(evidence: string): boolean {
   return evidenceFragments(evidence).length > 0;
 }
 
+/**
+ * True when every quoted fragment appears in the patch or the file at HEAD,
+ * ignoring diff markers, line-number prefixes, whitespace and line breaks,
+ * and treating `...`/`…` as an elision. Quotes that match nothing mean the
+ * finding describes code that is not there.
+ */
 export function evidenceAppearsInCode(
   evidence: string,
   file: ScopedFile,
