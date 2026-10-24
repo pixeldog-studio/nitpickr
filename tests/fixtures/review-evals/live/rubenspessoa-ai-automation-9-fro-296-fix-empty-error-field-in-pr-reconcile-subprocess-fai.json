@@ -1,6 +1,6 @@
 {
   "name": "rubenspessoa-ai-automation-9-fro-296-fix-empty-error-field-in-pr-reconcile-subprocess-fai",
-  "source": "https://github.com/rubenspessoa/ai-automation/pull/9",
+  "source": "https://github.com/pixeldog-studio/ai-automation/pull/9",
   "kind": "captured_clean",
   "stack": "python",
   "expectedVerdicts": [],

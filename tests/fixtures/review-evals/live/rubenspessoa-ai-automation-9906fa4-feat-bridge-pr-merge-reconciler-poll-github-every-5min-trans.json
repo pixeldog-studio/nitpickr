@@ -1,6 +1,6 @@
 {
   "name": "rubenspessoa-ai-automation-9906fa4-feat-bridge-pr-merge-reconciler-poll-github-every-5min-trans",
-  "source": "https://github.com/rubenspessoa/ai-automation/commit/9906fa43c84833c8d695824e82a24e47b45761a3",
+  "source": "https://github.com/pixeldog-studio/ai-automation/commit/9906fa43c84833c8d695824e82a24e47b45761a3",
   "kind": "captured_bug",
   "stack": "python",
   "expectedVerdicts": [],

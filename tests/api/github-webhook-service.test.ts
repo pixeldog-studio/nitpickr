@@ -122,7 +122,7 @@ class FakeGitHubAdapter {
       installationId: "123456",
       repositoryId: "github:99",
       providerRepositoryId: 99,
-      owner: "rubenspessoa",
+      owner: "example-owner",
       name: "nitpickr",
       defaultBranch: "main",
     },
@@ -164,7 +164,7 @@ describe("GitHubWebhookService", () => {
       queue,
       webhookEvents,
       new FakeLogger(),
-      { repositoryAllowlist: ["rubenspessoa/nitpickr-ollama-test"] },
+      { repositoryAllowlist: ["example-owner/nitpickr-ollama-test"] },
     );
 
     const result = await service.handle({
@@ -172,14 +172,14 @@ describe("GitHubWebhookService", () => {
       eventName: "issue_comment",
       signature: "sha256=test",
       rawBody: "{}",
-      payload: { repository: { full_name: "rubenspessoa/ai-automation" } },
+      payload: { repository: { full_name: "example-owner/ai-automation" } },
     });
 
     expect(result).toEqual({
       statusCode: 202,
       accepted: false,
       message:
-        "Repository rubenspessoa/ai-automation is not in NITPICKR_REPOSITORY_ALLOWLIST.",
+        "Repository example-owner/ai-automation is not in NITPICKR_REPOSITORY_ALLOWLIST.",
     });
     expect(adapter.reactToMentionCalls).toBe(0);
     expect(adapter.normalizeWebhookEventCalls).toBe(0);
@@ -195,7 +195,7 @@ describe("GitHubWebhookService", () => {
       queue,
       new FakeWebhookEventService(),
       new FakeLogger(),
-      { repositoryAllowlist: ["RubensPessoa/Nitpickr"] },
+      { repositoryAllowlist: ["Example-Owner/Nitpickr"] },
     );
 
     const result = await service.handle({
@@ -203,7 +203,7 @@ describe("GitHubWebhookService", () => {
       eventName: "pull_request",
       signature: "sha256=test",
       rawBody: "{}",
-      payload: { repository: { full_name: "rubenspessoa/nitpickr" } },
+      payload: { repository: { full_name: "example-owner/nitpickr" } },
     });
 
     expect(result.accepted).toBe(true);
@@ -464,7 +464,7 @@ describe("GitHubWebhookService", () => {
         installationId: "123456",
         repositoryId: "github:99",
         providerRepositoryId: 99,
-        owner: "rubenspessoa",
+        owner: "example-owner",
         name: "nitpickr",
         defaultBranch: "main",
       },
@@ -554,7 +554,7 @@ describe("GitHubWebhookService", () => {
         installationId: "123456",
         repositoryId: "github:99",
         providerRepositoryId: 99,
-        owner: "rubenspessoa",
+        owner: "example-owner",
         name: "nitpickr",
         defaultBranch: "main",
       },

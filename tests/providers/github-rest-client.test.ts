@@ -34,7 +34,7 @@ describe("GitHubRestClient", () => {
 
     const pullRequest = (await client.getPullRequest({
       installationId: "123456",
-      owner: "rubenspessoa",
+      owner: "example-owner",
       repo: "nitpickr",
       pullNumber: 42,
     })) as { number: number };
@@ -66,7 +66,7 @@ describe("GitHubRestClient", () => {
 
     const files = (await client.listPullRequestFiles({
       installationId: "123456",
-      owner: "rubenspessoa",
+      owner: "example-owner",
       repo: "nitpickr",
       pullNumber: 42,
     })) as Array<{ filename: string }>;
@@ -94,7 +94,7 @@ describe("GitHubRestClient", () => {
 
     const contents = await client.readTextFile({
       installationId: "123456",
-      owner: "rubenspessoa",
+      owner: "example-owner",
       repo: "nitpickr",
       path: ".nitpickr.yml",
       ref: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -125,7 +125,7 @@ describe("GitHubRestClient", () => {
 
     const contents = await client.getFileContent({
       installationId: "123456",
-      owner: "rubenspessoa",
+      owner: "example-owner",
       repo: "nitpickr",
       path: "assets/logo.png",
       ref: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -159,7 +159,7 @@ describe("GitHubRestClient", () => {
 
     const files = await client.listFiles({
       installationId: "123456",
-      owner: "rubenspessoa",
+      owner: "example-owner",
       repo: "nitpickr",
       path: ".nitpickr",
       ref: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -186,7 +186,7 @@ describe("GitHubRestClient", () => {
 
     const files = await client.listFiles({
       installationId: "123456",
-      owner: "rubenspessoa",
+      owner: "example-owner",
       repo: "nitpickr",
       path: ".nitpickr",
       ref: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -211,7 +211,7 @@ describe("GitHubRestClient", () => {
 
     const result = await client.publishPullRequestReview({
       installationId: "123456",
-      owner: "rubenspessoa",
+      owner: "example-owner",
       repo: "nitpickr",
       pullNumber: 42,
       body: "summary",
@@ -252,7 +252,7 @@ describe("GitHubRestClient", () => {
 
     const reviews = await client.listPullRequestReviews({
       installationId: "123456",
-      owner: "rubenspessoa",
+      owner: "example-owner",
       repo: "nitpickr",
       pullNumber: 42,
     });
@@ -286,7 +286,7 @@ describe("GitHubRestClient", () => {
 
     const created = await client.createCheckRun({
       installationId: "123456",
-      owner: "rubenspessoa",
+      owner: "example-owner",
       repo: "nitpickr",
       sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       name: "nitpickr / review",
@@ -301,7 +301,7 @@ describe("GitHubRestClient", () => {
     });
     expect(method).toBe("POST");
     expect(requestedUrl).toBe(
-      "https://api.github.com/repos/rubenspessoa/nitpickr/check-runs",
+      "https://api.github.com/repos/example-owner/nitpickr/check-runs",
     );
     expect(capturedBody).toContain('"name":"nitpickr / review"');
     expect(capturedBody).toContain('"status":"in_progress"');
@@ -309,7 +309,7 @@ describe("GitHubRestClient", () => {
 
     await client.updateCheckRun({
       installationId: "123456",
-      owner: "rubenspessoa",
+      owner: "example-owner",
       repo: "nitpickr",
       checkRunId: "88",
       status: "completed",
@@ -320,7 +320,7 @@ describe("GitHubRestClient", () => {
 
     expect(method).toBe("PATCH");
     expect(requestedUrl).toBe(
-      "https://api.github.com/repos/rubenspessoa/nitpickr/check-runs/88",
+      "https://api.github.com/repos/example-owner/nitpickr/check-runs/88",
     );
     expect(capturedBody).toContain('"status":"completed"');
     expect(capturedBody).toContain('"conclusion":"success"');
@@ -344,14 +344,14 @@ describe("GitHubRestClient", () => {
 
     await client.createIssueCommentReaction({
       installationId: "123456",
-      owner: "rubenspessoa",
+      owner: "example-owner",
       repo: "nitpickr",
       commentId: 9001,
       content: "eyes",
     });
 
     expect(requestedUrl).toBe(
-      "https://api.github.com/repos/rubenspessoa/nitpickr/issues/comments/9001/reactions",
+      "https://api.github.com/repos/example-owner/nitpickr/issues/comments/9001/reactions",
     );
     expect(capturedBody).toBe('{"content":"eyes"}');
   });
@@ -385,7 +385,7 @@ describe("GitHubRestClient", () => {
 
     const files = await client.comparePullRequestRange({
       installationId: "123456",
-      owner: "rubenspessoa",
+      owner: "example-owner",
       repo: "nitpickr",
       baseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       headSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -401,7 +401,7 @@ describe("GitHubRestClient", () => {
       },
     ]);
     expect(requestedUrl).toBe(
-      "https://api.github.com/repos/rubenspessoa/nitpickr/compare/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "https://api.github.com/repos/example-owner/nitpickr/compare/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     );
   });
 
@@ -451,7 +451,7 @@ describe("GitHubRestClient", () => {
 
     const threads = await client.listNitpickrReviewThreads({
       installationId: "123456",
-      owner: "rubenspessoa",
+      owner: "example-owner",
       repo: "nitpickr",
       pullNumber: 42,
       botLogins: ["getnitpickr"],
@@ -556,7 +556,7 @@ describe("GitHubRestClient", () => {
 
     const threads = await client.listNitpickrReviewThreads({
       installationId: "123456",
-      owner: "rubenspessoa",
+      owner: "example-owner",
       repo: "nitpickr",
       pullNumber: 42,
       botLogins: ["getnitpickr"],
@@ -628,13 +628,13 @@ describe("GitHubRestClient", () => {
 
     await client.getPullRequest({
       installationId: "123456",
-      owner: "rubenspessoa",
+      owner: "example-owner",
       repo: "nitpickr",
       pullNumber: 42,
     });
 
     expect(requestedUrl).toBe(
-      "http://github-stub:4010/repos/rubenspessoa/nitpickr/pulls/42",
+      "http://github-stub:4010/repos/example-owner/nitpickr/pulls/42",
     );
   });
 
@@ -657,14 +657,14 @@ describe("GitHubRestClient", () => {
 
     await client.createIssueComment({
       installationId: "123456",
-      owner: "rubenspessoa",
+      owner: "example-owner",
       repo: "nitpickr",
       issueNumber: 42,
       body: "status reply",
     });
     await client.replyToReviewComment({
       installationId: "123456",
-      owner: "rubenspessoa",
+      owner: "example-owner",
       repo: "nitpickr",
       pullNumber: 42,
       commentId: 7001,
@@ -672,8 +672,8 @@ describe("GitHubRestClient", () => {
     });
 
     expect(requestedUrls).toEqual([
-      "https://api.github.com/repos/rubenspessoa/nitpickr/issues/42/comments",
-      "https://api.github.com/repos/rubenspessoa/nitpickr/pulls/42/comments",
+      "https://api.github.com/repos/example-owner/nitpickr/issues/42/comments",
+      "https://api.github.com/repos/example-owner/nitpickr/pulls/42/comments",
     ]);
     expect(requestedBodies).toEqual([
       JSON.stringify({

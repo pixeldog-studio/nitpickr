@@ -130,7 +130,8 @@ describe("parseBootstrapConfig", () => {
       NITPICKR_BASE_URL: "https://nitpickr.up.railway.app",
       NITPICKR_SECRET_KEY: "super-secret-key",
       DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/a/b",
-      NITPICKR_REPOSITORY_ALLOWLIST: "rubenspessoa/nitpickr,rubenspessoa/demo",
+      NITPICKR_REPOSITORY_ALLOWLIST:
+        "example-owner/nitpickr,example-owner/demo",
       NITPICKR_PROMPT_OPTIMIZATION_MODE: "off",
     });
 
@@ -139,8 +140,8 @@ describe("parseBootstrapConfig", () => {
       "https://discord.com/api/webhooks/a/b",
     );
     expect(config.repositoryAllowlist).toEqual([
-      "rubenspessoa/nitpickr",
-      "rubenspessoa/demo",
+      "example-owner/nitpickr",
+      "example-owner/demo",
     ]);
     expect(config.review.promptOptimizationMode).toBe("off");
   });

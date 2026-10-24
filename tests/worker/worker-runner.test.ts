@@ -183,7 +183,7 @@ describe("WorkerRunner", () => {
         maxAttempts: 3,
         payload: {
           installationId: "123456",
-          repository: { owner: "rubenspessoa", name: "ai-automation" },
+          repository: { owner: "example-owner", name: "ai-automation" },
           pullNumber: 1,
           mode: "full",
         },
@@ -198,7 +198,7 @@ describe("WorkerRunner", () => {
 
     const runner = new WorkerRunner({
       logger,
-      repositoryAllowlist: ["rubenspessoa/nitpickr-ollama-test"],
+      repositoryAllowlist: ["example-owner/nitpickr-ollama-test"],
       queueScheduler: queue,
       githubAdapter: {
         async fetchChangeRequestContext() {
@@ -268,7 +268,7 @@ describe("WorkerRunner", () => {
         maxAttempts: 3,
         payload: {
           installationId: "123456",
-          repository: { owner: "rubenspessoa", name: "nitpickr" },
+          repository: { owner: "example-owner", name: "nitpickr" },
           pullNumber: 42,
           mode: "quick",
           trigger: { type: "pr_synchronized", actorLogin: "ruben" },
@@ -292,7 +292,7 @@ describe("WorkerRunner", () => {
             tenantId: "github-installation:123456",
             installationId: "123456",
             repositoryId: "github:99",
-            repository: { owner: "rubenspessoa", name: "nitpickr" },
+            repository: { owner: "example-owner", name: "nitpickr" },
             changeRequest: {
               id: "github:99:42",
               tenantId: "github-installation:123456",
@@ -371,7 +371,7 @@ describe("WorkerRunner", () => {
         maxAttempts: 3,
         payload: {
           installationId: "123456",
-          repository: { owner: "rubenspessoa", name: "nitpickr" },
+          repository: { owner: "example-owner", name: "nitpickr" },
           pullNumber: 42,
           mode: "full",
           trigger: { type: "pr_opened", actorLogin: "ruben" },
@@ -395,7 +395,7 @@ describe("WorkerRunner", () => {
             tenantId: "github-installation:123456",
             installationId: "123456",
             repositoryId: "github:99",
-            repository: { owner: "rubenspessoa", name: "nitpickr" },
+            repository: { owner: "example-owner", name: "nitpickr" },
             changeRequest: {
               id: "github:99:42",
               tenantId: "github-installation:123456",
@@ -472,7 +472,7 @@ describe("WorkerRunner", () => {
         payload: {
           installationId: "123456",
           repository: {
-            owner: "rubenspessoa",
+            owner: "example-owner",
             name: "nitpickr",
           },
           pullNumber: 42,
@@ -504,7 +504,7 @@ describe("WorkerRunner", () => {
             installationId: "123456",
             repositoryId: "github:99",
             repository: {
-              owner: "rubenspessoa",
+              owner: "example-owner",
               name: "nitpickr",
             },
             changeRequest: {
@@ -640,7 +640,7 @@ describe("WorkerRunner", () => {
         payload: {
           installationId: "123456",
           repository: {
-            owner: "rubenspessoa",
+            owner: "example-owner",
             name: "nitpickr",
           },
           pullNumber: 42,
@@ -672,7 +672,7 @@ describe("WorkerRunner", () => {
             installationId: "123456",
             repositoryId: "github:99",
             repository: {
-              owner: "rubenspessoa",
+              owner: "example-owner",
               name: "nitpickr",
             },
             changeRequest: {
@@ -809,7 +809,7 @@ describe("WorkerRunner", () => {
         payload: {
           installationId: "123456",
           repository: {
-            owner: "rubenspessoa",
+            owner: "example-owner",
             name: "nitpickr",
           },
           pullNumber: 42,
@@ -839,7 +839,7 @@ describe("WorkerRunner", () => {
             installationId: "123456",
             repositoryId: "github:99",
             repository: {
-              owner: "rubenspessoa",
+              owner: "example-owner",
               name: "nitpickr",
             },
             changeRequest: {
@@ -978,7 +978,7 @@ describe("WorkerRunner", () => {
         type: "pending",
         installationId: "123456",
         repository: {
-          owner: "rubenspessoa",
+          owner: "example-owner",
           name: "nitpickr",
         },
         sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -990,7 +990,7 @@ describe("WorkerRunner", () => {
         checkRunId: "check-run-1",
         installationId: "123456",
         repository: {
-          owner: "rubenspessoa",
+          owner: "example-owner",
           name: "nitpickr",
         },
         sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -1064,7 +1064,7 @@ describe("WorkerRunner", () => {
         payload: {
           installationId: "123456",
           repository: {
-            owner: "rubenspessoa",
+            owner: "example-owner",
             name: "nitpickr",
           },
           pullNumber: 42,
@@ -1093,7 +1093,7 @@ describe("WorkerRunner", () => {
             installationId: "123456",
             repositoryId: "github:99",
             repository: {
-              owner: "rubenspessoa",
+              owner: "example-owner",
               name: "nitpickr",
             },
             changeRequest: {
@@ -1327,7 +1327,7 @@ describe("WorkerRunner", () => {
         payload: {
           installationId: "123456",
           repository: {
-            owner: "rubenspessoa",
+            owner: "example-owner",
             name: "nitpickr",
           },
           pullNumber: 42,
@@ -1356,7 +1356,7 @@ describe("WorkerRunner", () => {
             installationId: "123456",
             repositoryId: "github:99",
             repository: {
-              owner: "rubenspessoa",
+              owner: "example-owner",
               name: "nitpickr",
             },
             changeRequest: {
@@ -1652,7 +1652,7 @@ describe("WorkerRunner", () => {
         payload: {
           installationId: "123456",
           repository: {
-            owner: "rubenspessoa",
+            owner: "example-owner",
             name: "nitpickr",
           },
           pullNumber: 42,
@@ -1778,7 +1778,7 @@ describe("WorkerRunner", () => {
         payload: {
           installationId: "123456",
           repository: {
-            owner: "rubenspessoa",
+            owner: "example-owner",
             name: "nitpickr",
           },
           pullNumber: 42,
@@ -1807,7 +1807,7 @@ describe("WorkerRunner", () => {
             installationId: "123456",
             repositoryId: "github:99",
             repository: {
-              owner: "rubenspessoa",
+              owner: "example-owner",
               name: "nitpickr",
             },
             changeRequest: {
@@ -1933,7 +1933,7 @@ describe("WorkerRunner", () => {
         payload: {
           installationId: "123456",
           repository: {
-            owner: "rubenspessoa",
+            owner: "example-owner",
             name: "nitpickr",
           },
           pullNumber: 42,
@@ -1962,7 +1962,7 @@ describe("WorkerRunner", () => {
             installationId: "123456",
             repositoryId: "github:99",
             repository: {
-              owner: "rubenspessoa",
+              owner: "example-owner",
               name: "nitpickr",
             },
             changeRequest: {
@@ -2087,7 +2087,7 @@ describe("WorkerRunner", () => {
         payload: {
           installationId: "123456",
           repository: {
-            owner: "rubenspessoa",
+            owner: "example-owner",
             name: "nitpickr",
           },
           pullNumber: 42,
@@ -2118,7 +2118,7 @@ describe("WorkerRunner", () => {
             installationId: "123456",
             repositoryId: "github:99",
             repository: {
-              owner: "rubenspessoa",
+              owner: "example-owner",
               name: "nitpickr",
             },
             changeRequest: {
@@ -2250,7 +2250,7 @@ describe("WorkerRunner", () => {
         payload: {
           installationId: "123456",
           repository: {
-            owner: "rubenspessoa",
+            owner: "example-owner",
             name: "nitpickr",
           },
           pullNumber: 42,
@@ -2280,7 +2280,7 @@ describe("WorkerRunner", () => {
             installationId: "123456",
             repositoryId: "github:99",
             repository: {
-              owner: "rubenspessoa",
+              owner: "example-owner",
               name: "nitpickr",
             },
             changeRequest: {
@@ -2422,7 +2422,7 @@ describe("WorkerRunner", () => {
         payload: {
           installationId: "123456",
           repository: {
-            owner: "rubenspessoa",
+            owner: "example-owner",
             name: "nitpickr",
           },
           pullNumber: 42,
@@ -2451,7 +2451,7 @@ describe("WorkerRunner", () => {
             installationId: "123456",
             repositoryId: "github:99",
             repository: {
-              owner: "rubenspessoa",
+              owner: "example-owner",
               name: "nitpickr",
             },
             changeRequest: {
@@ -2611,7 +2611,7 @@ describe("WorkerRunner", () => {
         maxAttempts: 3,
         payload: {
           installationId: "123456",
-          repository: { owner: "rubenspessoa", name: "nitpickr" },
+          repository: { owner: "example-owner", name: "nitpickr" },
           pullNumber: 42,
           mode: "quick",
           trigger: {
@@ -2638,7 +2638,7 @@ describe("WorkerRunner", () => {
             tenantId: "github-installation:123456",
             installationId: "123456",
             repositoryId: "github:99",
-            repository: { owner: "rubenspessoa", name: "nitpickr" },
+            repository: { owner: "example-owner", name: "nitpickr" },
             changeRequest: {
               id: "github:99:42",
               tenantId: "github-installation:123456",
@@ -2810,7 +2810,7 @@ describe("WorkerRunner", () => {
         maxAttempts: 3,
         payload: {
           installationId: "123456",
-          repository: { owner: "rubenspessoa", name: "nitpickr" },
+          repository: { owner: "example-owner", name: "nitpickr" },
           pullNumber: 42,
           mode: "quick",
           trigger: {
@@ -2837,7 +2837,7 @@ describe("WorkerRunner", () => {
             tenantId: "github-installation:123456",
             installationId: "123456",
             repositoryId: "github:99",
-            repository: { owner: "rubenspessoa", name: "nitpickr" },
+            repository: { owner: "example-owner", name: "nitpickr" },
             changeRequest: {
               id: "github:99:42",
               tenantId: "github-installation:123456",

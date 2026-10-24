@@ -1,6 +1,6 @@
 {
   "name": "rubenspessoa-ai-plant-scanner-7-reduced-swiftdata-cloudkit-unique",
-  "source": "https://github.com/rubenspessoa/ai-plant-scanner/pull/7 (reduced to the SwiftData model, schema, app container and entitlements files)",
+  "source": "https://github.com/pixeldog-studio/ai-plant-scanner/pull/7 (reduced to the SwiftData model, schema, app container and entitlements files)",
   "kind": "captured_bug",
   "stack": "swift",
   "expectedVerdicts": [],

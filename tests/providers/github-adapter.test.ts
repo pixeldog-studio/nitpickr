@@ -153,7 +153,7 @@ const pullRequestPayload = {
     id: 99,
     name: "nitpickr",
     owner: {
-      login: "rubenspessoa",
+      login: "example-owner",
     },
     default_branch: "main",
   },
@@ -222,7 +222,7 @@ describe("GitHubAdapter", () => {
       throw new Error("Expected a review request event.");
     }
 
-    expect(event.repository.owner).toBe("rubenspessoa");
+    expect(event.repository.owner).toBe("example-owner");
     expect(event.trigger.type).toBe("pr_opened");
     expect(event.mode).toBe("full");
   });
@@ -315,14 +315,14 @@ describe("GitHubAdapter", () => {
         id: 99,
         name: "nitpickr",
         owner: {
-          login: "rubenspessoa",
+          login: "example-owner",
         },
         default_branch: "main",
       },
       issue: {
         number: 42,
         pull_request: {
-          url: "https://api.github.com/repos/rubenspessoa/nitpickr/pulls/42",
+          url: "https://api.github.com/repos/example-owner/nitpickr/pulls/42",
         },
       },
       comment: {
@@ -369,14 +369,14 @@ describe("GitHubAdapter", () => {
         id: 99,
         name: "nitpickr",
         owner: {
-          login: "rubenspessoa",
+          login: "example-owner",
         },
         default_branch: "main",
       },
       issue: {
         number: 42,
         pull_request: {
-          url: "https://api.github.com/repos/rubenspessoa/nitpickr/pulls/42",
+          url: "https://api.github.com/repos/example-owner/nitpickr/pulls/42",
         },
       },
       comment: {
@@ -420,13 +420,13 @@ describe("GitHubAdapter", () => {
       repository: {
         id: 99,
         name: "nitpickr",
-        owner: { login: "rubenspessoa" },
+        owner: { login: "example-owner" },
         default_branch: "main",
       },
       issue: {
         number: 42,
         pull_request: {
-          url: "https://api.github.com/repos/rubenspessoa/nitpickr/pulls/42",
+          url: "https://api.github.com/repos/example-owner/nitpickr/pulls/42",
         },
       },
       comment: {
@@ -460,14 +460,14 @@ describe("GitHubAdapter", () => {
         id: 99,
         name: "nitpickr",
         owner: {
-          login: "rubenspessoa",
+          login: "example-owner",
         },
         default_branch: "main",
       },
       issue: {
         number: 42,
         pull_request: {
-          url: "https://api.github.com/repos/rubenspessoa/nitpickr/pulls/42",
+          url: "https://api.github.com/repos/example-owner/nitpickr/pulls/42",
         },
       },
       comment: {
@@ -514,14 +514,14 @@ describe("GitHubAdapter", () => {
         id: 99,
         name: "nitpickr",
         owner: {
-          login: "rubenspessoa",
+          login: "example-owner",
         },
         default_branch: "main",
       },
       issue: {
         number: 42,
         pull_request: {
-          url: "https://api.github.com/repos/rubenspessoa/nitpickr/pulls/42",
+          url: "https://api.github.com/repos/example-owner/nitpickr/pulls/42",
         },
       },
       comment: {
@@ -563,14 +563,14 @@ describe("GitHubAdapter", () => {
         id: 99,
         name: "nitpickr",
         owner: {
-          login: "rubenspessoa",
+          login: "example-owner",
         },
         default_branch: "main",
       },
       issue: {
         number: 42,
         pull_request: {
-          url: "https://api.github.com/repos/rubenspessoa/nitpickr/pulls/42",
+          url: "https://api.github.com/repos/example-owner/nitpickr/pulls/42",
         },
       },
       comment: {
@@ -615,7 +615,7 @@ describe("GitHubAdapter", () => {
         id: 99,
         name: "nitpickr",
         owner: {
-          login: "rubenspessoa",
+          login: "example-owner",
         },
         default_branch: "main",
       },
@@ -665,7 +665,7 @@ describe("GitHubAdapter", () => {
         id: 99,
         name: "nitpickr",
         owner: {
-          login: "rubenspessoa",
+          login: "example-owner",
         },
         default_branch: "main",
       },
@@ -718,14 +718,14 @@ describe("GitHubAdapter", () => {
         id: 99,
         name: "nitpickr",
         owner: {
-          login: "rubenspessoa",
+          login: "example-owner",
         },
         default_branch: "main",
       },
       issue: {
         number: 42,
         pull_request: {
-          url: "https://api.github.com/repos/rubenspessoa/nitpickr/pulls/42",
+          url: "https://api.github.com/repos/example-owner/nitpickr/pulls/42",
         },
       },
       comment: {
@@ -763,7 +763,7 @@ describe("GitHubAdapter", () => {
       repository: {
         id: 99,
         name: "nitpickr",
-        owner: { login: "rubenspessoa" },
+        owner: { login: "example-owner" },
         default_branch: "main",
       },
       pull_request: { number: 42 },
@@ -800,14 +800,14 @@ describe("GitHubAdapter", () => {
         id: 99,
         name: "nitpickr",
         owner: {
-          login: "rubenspessoa",
+          login: "example-owner",
         },
         default_branch: "main",
       },
       issue: {
         number: 42,
         pull_request: {
-          url: "https://api.github.com/repos/rubenspessoa/nitpickr/pulls/42",
+          url: "https://api.github.com/repos/example-owner/nitpickr/pulls/42",
         },
       },
       comment: {
@@ -826,7 +826,7 @@ describe("GitHubAdapter", () => {
     expect(apiClient.reactions).toEqual([
       {
         installationId: "123456",
-        owner: "rubenspessoa",
+        owner: "example-owner",
         repo: "nitpickr",
         commentId: 7001,
         content: "eyes",
@@ -848,7 +848,7 @@ describe("GitHubAdapter", () => {
     const context = await adapter.fetchChangeRequestContext({
       installationId: "123456",
       repository: {
-        owner: "rubenspessoa",
+        owner: "example-owner",
         name: "nitpickr",
       },
       pullNumber: 42,
@@ -882,7 +882,7 @@ describe("GitHubAdapter", () => {
         },
       }).fetchChangeRequestContext({
         installationId: "123456",
-        repository: { owner: "rubenspessoa", name: "nitpickr" },
+        repository: { owner: "example-owner", name: "nitpickr" },
         pullNumber: 42,
         tenantId: "tenant_1",
         repositoryId: "repo_1",
@@ -909,7 +909,7 @@ describe("GitHubAdapter", () => {
     const files = await adapter.comparePullRequestRange({
       installationId: "123456",
       repository: {
-        owner: "rubenspessoa",
+        owner: "example-owner",
         name: "nitpickr",
       },
       baseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -944,7 +944,7 @@ describe("GitHubAdapter", () => {
     const threads = await adapter.listNitpickrReviewThreads({
       installationId: "123456",
       repository: {
-        owner: "rubenspessoa",
+        owner: "example-owner",
         name: "nitpickr",
       },
       pullNumber: 42,

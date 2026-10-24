@@ -734,7 +734,7 @@ describe("review flow integration", () => {
         id: 99,
         name: "nitpickr",
         owner: {
-          login: "rubenspessoa",
+          login: "example-owner",
         },
         default_branch: "main",
       },
@@ -839,14 +839,14 @@ describe("review flow integration", () => {
         id: 99,
         name: "nitpickr",
         owner: {
-          login: "rubenspessoa",
+          login: "example-owner",
         },
         default_branch: "main",
       },
       issue: {
         number: 42,
         pull_request: {
-          url: "https://api.github.com/repos/rubenspessoa/nitpickr/pulls/42",
+          url: "https://api.github.com/repos/example-owner/nitpickr/pulls/42",
         },
       },
       comment: {
@@ -882,7 +882,7 @@ describe("review flow integration", () => {
     expect(harness.githubApi.reactions).toEqual([
       {
         installationId: "123456",
-        owner: "rubenspessoa",
+        owner: "example-owner",
         repo: "nitpickr",
         commentId: 9001,
         content: "eyes",
@@ -962,7 +962,7 @@ describe("review flow integration", () => {
       id: "review_run_previous",
       tenantId: "github-installation:123456",
       repositoryId: "github:99",
-      changeRequestId: "github:rubenspessoa/nitpickr#42",
+      changeRequestId: "github:example-owner/nitpickr#42",
       trigger: {
         type: "pr_opened",
         actorLogin: "ruben",
@@ -1025,7 +1025,7 @@ describe("review flow integration", () => {
         id: 99,
         name: "nitpickr",
         owner: {
-          login: "rubenspessoa",
+          login: "example-owner",
         },
         default_branch: "main",
       },

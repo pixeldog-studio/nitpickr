@@ -1,6 +1,6 @@
 {
   "name": "rubenspessoa-user-management-1-add-security-hardening-for-production-deployment",
-  "source": "https://github.com/rubenspessoa/user-management/pull/1",
+  "source": "https://github.com/pixeldog-studio/user-management/pull/1",
   "kind": "captured_bug",
   "stack": "typescript",
   "expectedVerdicts": [],

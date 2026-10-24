@@ -1,6 +1,6 @@
 {
   "name": "rubenspessoa-ai-plant-scanner-web-15-fro-265-community-waitlist-endpoint",
-  "source": "https://github.com/rubenspessoa/ai-plant-scanner-web/pull/15",
+  "source": "https://github.com/pixeldog-studio/ai-plant-scanner-web/pull/15",
   "kind": "captured_bug",
   "stack": "typescript",
   "expectedVerdicts": [],

@@ -182,7 +182,7 @@ Baseline commit: `e7aecec`. One PR per milestone; never merge; nitpickr reviews 
   - `pnpm test` (`51` files, `269` tests)
   - `pnpm eval:reviews`
 - Opened PR for review:
-  - `https://github.com/rubenspessoa/nitpickr/pull/4`
+  - `https://github.com/pixeldog-studio/nitpickr/pull/4`
   - posted `@nitpickr review`
 # Prompt Token Optimization v1
 
@@ -399,7 +399,7 @@ Baseline commit: `e7aecec`. One PR per milestone; never merge; nitpickr reviews 
 - Re-triaged all nitpickr review threads on PR #5 and kept only the feedback that still matched the simplified marketing site.
 - Restored a working GitHub Actions setup by keeping `pnpm/action-setup` ahead of cache-enabled `actions/setup-node`, and added `pnpm site:build` to CI.
 - Switched the shared header mark to the smaller SVG chip, simplified the imprint header/footer, fixed the EU ODR link to `https`, and replaced the example model name with a neutral placeholder.
-- Removed stale mobile-nav JavaScript, tightened the hero height so the page stops feeling like a full-screen splash, pushed commit [`49b935a`](https://github.com/rubenspessoa/nitpickr/commit/49b935a074b27499370d006e41cc36500bfef32b), and resolved all open nitpickr review threads.
+- Removed stale mobile-nav JavaScript, tightened the hero height so the page stops feeling like a full-screen splash, pushed commit [`49b935a`](https://github.com/pixeldog-studio/nitpickr/commit/49b935a074b27499370d006e41cc36500bfef32b), and resolved all open nitpickr review threads.
 
 ## Follow-up Sweep
 
@@ -428,7 +428,7 @@ Baseline commit: `e7aecec`. One PR per milestone; never merge; nitpickr reviews 
 ## Public Pages Launch
 
 - [x] Confirm the repository is clean before changing its GitHub visibility and Pages settings.
-- [x] Make `rubenspessoa/nitpickr` public.
+- [x] Make `pixeldog-studio/nitpickr` public.
 - [x] Enable GitHub Pages on the repo using the existing Actions workflow.
 - [x] Trigger a deployment and verify the published Pages URL.
 - [x] Point the Pages site at `nitpickr.rubenspessoa.dev` in GitHub Pages settings.
@@ -565,8 +565,8 @@ Plan: ~/.claude/plans/plan-plan-mode-how-fuzzy-brooks.md
 
   Decision: default `qwen3.6:35b-a3b-nvfp4` + `OPENAI_REASONING_EFFORT=none` (best recall per second; extra "unexpected" findings are mostly reasonable nits, not hallucinations). Revisit with real captured PRs.
 - Found & fixed during eval: Node fetch's 300 s undici `headersTimeout` killed slow non-streaming generations ("fetch failed" at 301 s) → model calls now go through an undici Agent sized by `OPENAI_REQUEST_TIMEOUT_MS`.
-- Pending (needs human): enable Tailscale Funnel, create the GitHub App, fill GitHub values in `.env`, restart compose, open the verification PR on `rubenspessoa/nitpickr-ollama-test`.
-- Verification PR (rubenspessoa/nitpickr-ollama-test#1, 2026-08-16): webhook via Tailscale Funnel → queue → worker → Ollama → GitHub, all green.
+- Pending (needs human): enable Tailscale Funnel, create the GitHub App, fill GitHub values in `.env`, restart compose, open the verification PR on the personal `nitpickr-ollama-test` repo.
+- Verification PR (personal `nitpickr-ollama-test`#1, 2026-08-16): webhook via Tailscale Funnel → queue → worker → Ollama → GitHub, all green.
   - Round 1 (`opened`, qwen3.6/none): job 29 s (model 20 s, 3076+727 tok, 1 chunk); 3 correct inline findings; summary + mermaid; check run `nitpickr / review` success; embeddings 768-d OK.
   - Round 2 (`synchronize`, commit-delta): 19 s; 2 findings — one false positive (called the correct pagination fix a regression) and one "logic corrected" note posted as a finding; outdated round-1 threads were not auto-resolved (investigate stale-thread resolution path).
   - Round 3 (`@nitpickrai review`, qwen3.8/none, cold): 145 s; first reply had trailing text after the JSON → automatic re-prompt succeeded (attempts=2); 3 findings.
