@@ -1,6 +1,6 @@
 {
   "name": "rubenspessoa-ai-automation-e0fe195-feat-crew-d18-integration-auth-monitoring",
-  "source": "https://github.com/rubenspessoa/ai-automation/commit/e0fe1953df3f89046dca0d7975a2493c0ba1f8ba",
+  "source": "https://github.com/pixeldog-studio/ai-automation/commit/e0fe1953df3f89046dca0d7975a2493c0ba1f8ba",
   "kind": "captured_bug",
   "stack": "python",
   "expectedVerdicts": [],

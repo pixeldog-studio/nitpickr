@@ -1,6 +1,6 @@
 {
   "name": "rubenspessoa-user-management-2-add-stripe-checkout-and-billing-portal-endpoints",
-  "source": "https://github.com/rubenspessoa/user-management/pull/2",
+  "source": "https://github.com/pixeldog-studio/user-management/pull/2",
   "kind": "captured_bug",
   "stack": "typescript",
   "expectedVerdicts": [],

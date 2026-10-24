@@ -59,7 +59,8 @@ comments and a check run. Node 24, pnpm, TypeScript ESM, Vitest, Biome.
 - Everything else: structured JSON logs on stdout/stderr from `src/logging/logger.ts` (with correlation ids), read from the API/worker container logs.
 - Read them with: the Sentry MCP or `sentry-cli` for the project behind the deployment's `SENTRY_DSN`; `docker compose logs api worker` for logs.
 
-## Linear
+## Tickets
 
-- Project: none yet (team FRO).
-- Strict gitflow: `feature/fro-123-slug` (or `bugfix/`) from `develop`; PR title `FRO-123: summary`; PR into `develop`; releases to `main` are human-only.
+- GitHub issues in `pixeldog-studio/nitpickr`, tracked on the org Project "Pixeldog Portfolio" with Product **Platform**. Cross-repo and design work lives in `pixeldog-studio/hq`. Conventions: hq's `pixeldog-github` skill.
+- Strict gitflow: `feature/gh-123-slug` (or `bugfix/`) from `develop`; PR title `#123: summary`; PR body `Closes #123`; PR into `develop`. Without an issue use `feature/<slug>` and PR title `chore: summary`. Releases to `main` are human-only.
+- Merges into `develop` follow WORKFLOW.md §7: only the hub merges, after the quality gate passes and Nitpickr has reviewed the latest head with no open threads; subagents and lanes stop at MERGE-READY. Never into `main`.

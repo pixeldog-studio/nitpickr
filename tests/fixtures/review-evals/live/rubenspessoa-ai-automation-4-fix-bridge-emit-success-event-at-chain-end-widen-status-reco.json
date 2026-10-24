@@ -1,6 +1,6 @@
 {
   "name": "rubenspessoa-ai-automation-4-fix-bridge-emit-success-event-at-chain-end-widen-status-reco",
-  "source": "https://github.com/rubenspessoa/ai-automation/pull/4",
+  "source": "https://github.com/pixeldog-studio/ai-automation/pull/4",
   "kind": "captured_bug",
   "stack": "python",
   "expectedVerdicts": [],

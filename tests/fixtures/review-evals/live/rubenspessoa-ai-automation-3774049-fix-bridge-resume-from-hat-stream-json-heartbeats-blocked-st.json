@@ -1,6 +1,6 @@
 {
   "name": "rubenspessoa-ai-automation-3774049-fix-bridge-resume-from-hat-stream-json-heartbeats-blocked-st",
-  "source": "https://github.com/rubenspessoa/ai-automation/commit/3774049cbc6a73f8ce901a8b645a0cdc0e7b265e",
+  "source": "https://github.com/pixeldog-studio/ai-automation/commit/3774049cbc6a73f8ce901a8b645a0cdc0e7b265e",
   "kind": "captured_bug",
   "stack": "python",
   "expectedVerdicts": [],

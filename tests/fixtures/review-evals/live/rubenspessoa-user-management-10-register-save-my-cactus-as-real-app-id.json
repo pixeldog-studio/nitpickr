@@ -1,6 +1,6 @@
 {
   "name": "rubenspessoa-user-management-10-register-save-my-cactus-as-real-app-id",
-  "source": "https://github.com/rubenspessoa/user-management/pull/10",
+  "source": "https://github.com/pixeldog-studio/user-management/pull/10",
   "kind": "captured_clean",
   "stack": "typescript",
   "expectedVerdicts": [],

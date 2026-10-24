@@ -1,6 +1,6 @@
 {
   "name": "rubenspessoa-user-management-9-add-centralized-onboarding-tracking-via-user-profiles",
-  "source": "https://github.com/rubenspessoa/user-management/pull/9",
+  "source": "https://github.com/pixeldog-studio/user-management/pull/9",
   "kind": "captured_clean",
   "stack": "typescript",
   "expectedVerdicts": [],
