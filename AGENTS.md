@@ -62,6 +62,5 @@ comments and a check run. Node 24, pnpm, TypeScript ESM, Vitest, Biome.
 ## Tickets
 
 - GitHub issues in `pixeldog-studio/nitpickr`, tracked on the org Project "Pixeldog Portfolio" with Product **Platform**. Cross-repo and design work lives in `pixeldog-studio/hq`. Conventions: hq's `pixeldog-github` skill.
-- Strict gitflow: `feature/gh-123-slug` (or `bugfix/`) from `develop`; PR title `#123: summary`; PR body `Closes #123`; PR into `develop`. Without an issue use `feature/<slug>`. Releases to `main` are human-only.
-- Agents may merge into `develop` after the quality gate passes and Nitpickr has reviewed the latest head (WORKFLOW.md §7).
-
+- Strict gitflow: `feature/gh-123-slug` (or `bugfix/`) from `develop`; PR title `#123: summary`; PR body `Closes #123`; PR into `develop`. Without an issue use `feature/<slug>` and PR title `chore: summary`. Releases to `main` are human-only.
+- Merges into `develop` follow WORKFLOW.md §7: only the hub merges, after the quality gate passes and Nitpickr has reviewed the latest head with no open threads; subagents and lanes stop at MERGE-READY. Never into `main`.
