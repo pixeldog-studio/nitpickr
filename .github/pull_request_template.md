@@ -1,6 +1,6 @@
 ## Ticket
 
-<!-- FRO-123 link, or "no ticket (chore)" -->
+<!-- "Closes #123" (the issue in this repo; a cross-repo ticket: "Closes pixeldog-studio/<repo>#123"), or "no ticket (chore)" -->
 
 ## What changed
 
