@@ -46,10 +46,11 @@ for (const ex of loadExtracts(design)) {
     }
   };
   walk(data.tree);
+  // Same element boxes for every scheme: the DOM is identical and only colours change (dark frames are instances
+  // of the light ones).
   for (const scheme of cfg.schemes) {
     const key = `${ex.screen}__${ex.viewport.name}__${scheme}`;
     const ax = join(design, ".refs", "ax", `${key}.ax.json`);
-    writeFileSync(ax, JSON.stringify(els));
     // align.py works in @3x pixels of point coordinates; these captures are 1x, so scale the boxes by 1/3.
     const scaled = els.map((e) => ({
       ...e,
@@ -73,6 +74,13 @@ for (const ex of loadExtracts(design)) {
       ],
       { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
     );
+    // A missing interpreter or a crash in align.py is a failure, never a silent 0/0.
+    if (r.error || r.status !== 0) {
+      console.error(
+        `align.py failed for ${key}: ${r.error?.message || r.stderr.trim().split("\n").pop()}`,
+      );
+      process.exit(1);
+    }
     const lines = r.stdout.split("\n").filter((l) => /dx=/.test(l));
     const ok = lines.filter((l) => !/out of tolerance/.test(l)).length;
     const w = Number(/worst shift: (\d+)/.exec(r.stdout)?.[1] || 0);
