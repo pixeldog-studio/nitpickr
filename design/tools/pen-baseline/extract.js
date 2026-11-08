@@ -622,6 +622,16 @@
     title: document.title,
     width: doc.clientWidth,
     height: Math.max(doc.scrollHeight, document.body.scrollHeight),
+    // What the browser paints where no background is set: the Canvas system colour under the page's color-scheme.
+    canvas: (() => {
+      const p = document.createElement("div");
+      p.style.cssText =
+        "position:absolute;left:-9999px;width:1px;height:1px;background:Canvas";
+      document.documentElement.appendChild(p);
+      const c = norm(getComputedStyle(p).backgroundColor);
+      p.remove();
+      return c;
+    })(),
     htmlBg: norm(getComputedStyle(doc).backgroundColor),
     bodyBg: norm(getComputedStyle(document.body).backgroundColor),
     vars,
