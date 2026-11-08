@@ -191,7 +191,7 @@ Code wins ties: `website/styles.css` is the source of truth.
 - Type: Space Grotesk for display headings, IBM Plex Sans for body, IBM Plex Mono for eyebrows, labels and code,
   all self-hosted (`website/assets/fonts`, same families as Google Fonts, which Pen uses).
 - Sizes are `rem`/`clamp()`, so font sizes and spacing are fluid: the scales above are the pixel values the
-  pages render at 1440 and 390 px wide, not a designed scale.
+  pages render at 1440, 834, 600 and 390 px wide, not a designed scale.
 
 ## Principles (read from the CSS)
 
@@ -204,10 +204,10 @@ Code wins ties: `website/styles.css` is the source of truth.
 
 ## Open questions
 
-- 20 `literal-*` colours have no custom property: mostly `--text`'s ink (#1F1913) at 3–18% alpha for rules and
+- 22 `literal-*` colours have no custom property: mostly `--text`'s ink (#1F1913) at 3–18% alpha for rules and
   table stripes, white at several alphas for glass, and the page-background gradient stops. Should they become
   properties (`--line-faint`, `--glass`…) so the site and the Pen file share names?
-- Spacing and type have no scale: 54 spacing values and 26 font sizes come from `rem` maths and `clamp()`. A
+- Spacing and type have no scale: 61 spacing values and 28 font sizes come from `rem` maths and `clamp()`. A
   4/8 px spacing scale and a fixed type ramp would make the design file much smaller.
 - Values marked "from layout" are gaps made of margins (no gap property); they bind but aren't design decisions.
 - `--accent-soft` is defined but nothing renders it.
