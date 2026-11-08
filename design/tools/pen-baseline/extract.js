@@ -1,7 +1,8 @@
 // Runs inside the page (page.evaluate). Returns the rendered tree: boxes in page coordinates, the computed styles
 // Pen can express, text runs and line boxes, images and inline SVG, plus every CSS custom property on :root
 // resolved to its computed value. Kept dependency-free and side-effect-free apart from data-pen ids.
-(_opts) => {
+/* global window, document, getComputedStyle, DOMMatrix, location */
+globalThis.__penExtract = () => {
   const scrollY = window.scrollY,
     scrollX = window.scrollX;
   const px = (v) => (v === "" || v == null ? 0 : parseFloat(v) || 0);
@@ -31,7 +32,7 @@
     if (!c || c === "none" || c === "transparent" || c === "rgba(0, 0, 0, 0)")
       return null;
     if (cache.has(c)) return cache.get(c);
-    let out = null;
+    let out;
     const m =
       /^rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)$/.exec(c);
     if (m) {
@@ -584,7 +585,7 @@
   for (const sheet of document.styleSheets) {
     try {
       collect(sheet.cssRules);
-    } catch (_e) {
+    } catch {
       /* cross-origin */
     }
   }

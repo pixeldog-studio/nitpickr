@@ -1,3 +1,4 @@
+/* global process */
 // DESIGN.md front matter -> Pen variables. Colours come from `hq design pen-tokens` (the converter the design flow
 // mandates); every other token section is flattened to number/string variables named `<section>-<key>` and
 // `text-<role>-<prop>`. No dependencies: the front matter uses a small YAML subset (nested maps, inline

@@ -17,15 +17,15 @@ token. Nothing here runs in CI; the app's own verify ignores it apart from lint/
    then `python3 design/tools/pen-baseline/shrink_exports.py design/exports/<ticket>` makes the committed previews
    256-colour PNGs.
 
-| File | Role |
-|---|---|
-| `extract.js` | runs in the page: boxes, computed styles, text lines, SVG paths, resolved `:root` custom properties |
-| `capture.mjs` | drives Chromium per route × viewport × scheme; screenshots, extracts, assets |
-| `usage.mjs` | names each rendered value after the code's custom property when one matches |
-| `tokens-draft.mjs` | DESIGN.md front matter from the captures (`--write` keeps the prose) |
-| `tokens.mjs` | DESIGN.md → Pen variables (colours through `hq design pen-tokens`) |
-| `build.mjs` | extracts + variables → `.pen`: auto-layout where CSS flex/flow matches Pen's rules exactly, measured positions elsewhere; light page frames are components and dark frames are instances with the dark theme |
-| `verify.mjs`, `align-web.mjs`, `align.py` | export, diff, binding report, per-element alignment |
+| File                                      | Role                                                                                                                                                                                                         |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `extract.js`                              | runs in the page: boxes, computed styles, text lines, SVG paths, resolved `:root` custom properties                                                                                                          |
+| `capture.mjs`                             | drives Chromium per route × viewport × scheme; screenshots, extracts, assets                                                                                                                                 |
+| `usage.mjs`                               | names each rendered value after the code's custom property when one matches                                                                                                                                  |
+| `tokens-draft.mjs`                        | DESIGN.md front matter from the captures (`--write` keeps the prose)                                                                                                                                         |
+| `tokens.mjs`                              | DESIGN.md → Pen variables (colours through `hq design pen-tokens`)                                                                                                                                           |
+| `build.mjs`                               | extracts + variables → `.pen`: auto-layout where CSS flex/flow matches Pen's rules exactly, measured positions elsewhere; light page frames are components and dark frames are instances with the dark theme |
+| `verify.mjs`, `align-web.mjs`, `align.py` | export, diff, binding report, per-element alignment                                                                                                                                                          |
 
 Known Pen limits (pen 0.3.14): `$variables` on width/height are ignored and on opacity render wrong, so those are
 literal numbers; text underline isn't exported; pseudo-elements (`::before`/`::after`) are not reproduced.

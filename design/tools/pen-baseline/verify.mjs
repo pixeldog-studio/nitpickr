@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* global console, process */
 import { spawnSync } from "node:child_process";
 // Verifies a Pen baseline as it is on disk (no rebuild):
 //   1. exports every frame named `<id>/...` at @3x through `pen interactive` (headless, no agent, no cost) into
@@ -43,7 +44,12 @@ const cmd = `execute({ input: ${JSON.stringify(js)} })\nexit()\n`;
 const r = spawnSync(
   "pen",
   ["interactive", "--in", pen, "--out", join(tmp, "scratch.pen")],
-  { input: cmd, encoding: "utf8", cwd: dirname(pen), timeout: 600000 },
+  {
+    input: cmd,
+    encoding: "utf8",
+    cwd: dirname(pen),
+    timeout: 600000,
+  },
 );
 const log = (r.stdout || "") + (r.stderr || "");
 const frames = [...log.matchAll(/^FRAME (\S+) (.+)$/gm)].map((m) => ({

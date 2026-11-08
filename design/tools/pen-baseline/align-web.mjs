@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* global console, process */
 import { spawnSync } from "node:child_process";
 // Per-element alignment for the web frames (rules/design-fidelity.md's check, adapted): every text line and image
 // the extractor recorded becomes an element box; align.py finds the shift that best maps the Pen export onto the

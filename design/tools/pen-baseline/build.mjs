@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* global console */
 // Builds design/<file>.pen from the captured extracts (capture.mjs) and design/DESIGN.md (tokens.mjs ->
 // `hq design pen-tokens`). Deterministic for the same inputs.
 //  - Every fill, stroke, radius, font size/family/weight, line height, letter spacing, gap and padding is a
@@ -106,7 +107,6 @@ const familyVar = (ff, size) => {
 // ---------- conversion ----------
 let seq = 0;
 const nid = (p) => `${p}${(++seq).toString(36)}`;
-const _TRANSPARENT = (c) => !c;
 const tagName = (n) =>
   n.label
     ? `${n.tag} "${n.label}"`
@@ -291,8 +291,7 @@ function textNodes(run, el, d, origin, paragraph) {
     ];
   }
   if (paragraph) {
-    const _x0 = Math.min(...lines.map((q) => q.x)),
-      y0 = lines[0].y;
+    const y0 = lines[0].y;
     const right = el.rect.x + el.rect.w - s.padding[1] - s.border[1];
     const left = el.rect.x + s.padding[3] + s.border[3];
     const align = {
@@ -1061,7 +1060,9 @@ const ds = V(
     sec("Components", [
       T(
         "Shared page chrome. Every page uses instances; edit a master and every page follows.",
-        { fill: muted },
+        {
+          fill: muted,
+        },
       ),
       ...[...comps.values()],
     ]),

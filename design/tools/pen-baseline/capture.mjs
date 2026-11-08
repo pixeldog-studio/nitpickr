@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* global console, process, Buffer, URL, setTimeout, document, window */
 import { createHash } from "node:crypto";
 // Captures every route in manifest.txt from a local server running this worktree's build:
 //   design/.refs/captures/<screen>__<viewport>__<scheme>.png   full-page screenshot (DPR 1)
@@ -21,9 +22,8 @@ const { chromium } = await import(
   process.env.PLAYWRIGHT_MODULE || "playwright"
 );
 // extract.js is one arrow-function expression; a formatter may add a trailing semicolon.
-const extractSrc = readFileSync(join(here, "extract.js"), "utf8")
-  .trim()
-  .replace(/;$/, "");
+// extract.js defines globalThis.__penExtract inside the page.
+const extractSrc = readFileSync(join(here, "extract.js"), "utf8");
 const cfg = JSON.parse(readFileSync(join(here, "config.json"), "utf8"));
 // manifest rows: <screen> <path> [note…]
 const rows = readFileSync(join(here, "manifest.txt"), "utf8")
@@ -212,7 +212,7 @@ for (const [screen, path, ...rest] of rows) {
         animations: "disabled",
       });
       const data = await page.evaluate(
-        `(${extractSrc})(${JSON.stringify({})})`,
+        `${extractSrc}\n;globalThis.__penExtract()`,
       );
       out.schemes[scheme] = data;
     }

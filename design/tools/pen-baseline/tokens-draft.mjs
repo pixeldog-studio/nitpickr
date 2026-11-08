@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* global console, process */
 // Prints the DESIGN.md front matter for this site from what the captured pages render (capture.mjs first):
 // colours as light/dark pairs named after the code's custom properties, and every spacing, radius, type and
 // border value in use, named after the code's custom properties where one matches. Values with no custom
