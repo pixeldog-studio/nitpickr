@@ -436,6 +436,28 @@ function layoutFor(n, kids) {
   return null;
 }
 
+// A CSS-rotated leaf (no element children): Pen box of the layout size, rotated about its top-left corner, placed
+// so it lands where the browser drew it (transform-origin at the centre, the CSS default).
+function rotate(node, n, origin) {
+  const xf = n.xf;
+  if (!xf || (n.kids || []).length) return node;
+  const th = Math.atan2(xf.b, xf.a);
+  const w = xf.w * Math.hypot(xf.a, xf.b);
+  const h = xf.h * Math.hypot(xf.c, xf.d);
+  const cx = n.rect.x + n.rect.w / 2;
+  const cy = n.rect.y + n.rect.h / 2;
+  const x = cx + Math.cos(th) * (-w / 2) - Math.sin(th) * (-h / 2);
+  const y = cy + Math.sin(th) * (-w / 2) + Math.cos(th) * (-h / 2);
+  return {
+    ...node,
+    x: r2(x - origin.x),
+    y: r2(y - origin.y),
+    width: r2(w),
+    height: r2(h),
+    rotation: r2((-th * 180) / Math.PI),
+  };
+}
+
 function convert(n, D, origin, ctx) {
   const d = D ? D.get(n.id) : null;
   const s = n.s,
@@ -620,7 +642,15 @@ function convert(n, D, origin, ctx) {
       flowKids.push(...t);
     } else {
       const c = convert(k, D, myOrigin, ctx);
-      if (outOfFlow(k))
+      if (k.xf && c.length === 1) c[0] = rotate(c[0], k, myOrigin); // rotated icons and images too
+      // CSS stacking: a positioned child with a z-index paints above (or below) its siblings regardless of DOM
+      // order. Pen paints in child order, so those children come out of the flow and are re-ordered by z.
+      const z =
+        k.s && k.s.position !== "static" && /^-?\d+$/.test(k.s.zIndex)
+          ? Number(k.s.zIndex)
+          : 0;
+      for (const x of c) if (z && x._z === undefined) x._z = z;
+      if (outOfFlow(k) || z)
         c.forEach((x) => {
           x.layoutPosition = "absolute";
           x._abs = true;
@@ -672,6 +702,12 @@ function convert(n, D, origin, ctx) {
   }
   if (s.opacity < 1) frame.opacity = s.opacity;
   if (clip) frame.clip = true;
+  const byZ = (list) =>
+    list
+      .map((k, i) => [k, i])
+      .sort((a, c) => (a[0]._z || 0) - (c[0]._z || 0) || a[1] - c[1])
+      .map(([k]) => k);
+  kids.splice(0, kids.length, ...byZ(kids));
   const lay = layoutFor(n, flowKids);
   if (lay) {
     Object.assign(
@@ -700,7 +736,7 @@ function convert(n, D, origin, ctx) {
     frame.children = kids;
     if (kids.length) ctx.stats.absolute++;
   }
-  return [frame];
+  return [rotate(frame, n, origin)];
 }
 
 // ---------- pages ----------

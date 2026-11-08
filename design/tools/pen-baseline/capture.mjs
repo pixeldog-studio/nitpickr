@@ -108,9 +108,23 @@ const assets = async (page, node, ctx, out) => {
 };
 
 const only = args.only ? new Set(args.only.split(",")) : null;
-for (const [screen, path] of rows) {
+// Row options after the path, whitespace-separated key=value (%20 for a space in a value):
+//   only=mobile,tablet      viewports this state exists at (e.g. a hamburger menu)
+//   status=404              expected HTTP status instead of 2xx
+//   mock=<glob>|<status>|<json>   answer matching requests (form outcomes); status "hang" never answers
+//   click=<selector>  fill=<selector>|<text>  open=<details selector>  press=<key>  wait=<ms>   steps, in order
+const opts = (tokens) =>
+  tokens.map((t) => {
+    const i = t.indexOf("=");
+    return [t.slice(0, i), decodeURIComponent(t.slice(i + 1))];
+  });
+for (const [screen, path, ...rest] of rows) {
   if (only && !only.has(screen)) continue;
+  const o = opts(rest);
+  const onlyVp = o.find(([k]) => k === "only")?.[1].split(",");
+  const wantStatus = Number(o.find(([k]) => k === "status")?.[1] || 0);
   for (const vp of cfg.viewports) {
+    if (onlyVp && !onlyVp.includes(vp.name)) continue;
     const ctx = await browser.newContext({
       viewport: { width: vp.width, height: vp.height },
       deviceScaleFactor: 1,
@@ -119,12 +133,25 @@ for (const [screen, path] of rows) {
       locale: cfg.locale || "en-US",
     });
     const page = await ctx.newPage();
+    for (const [k, v] of o) {
+      if (k !== "mock") continue;
+      const [glob, status, body] = v.split("|");
+      await page.route(glob, (route) =>
+        status === "hang"
+          ? undefined
+          : route.fulfill({
+              status: Number(status),
+              contentType: "application/json",
+              body: body || "{}",
+            }),
+      );
+    }
     const url = new URL(path, base).href;
     const res = await page.goto(url, {
       waitUntil: "networkidle",
       timeout: 60000,
     });
-    if (!res?.ok()) {
+    if (wantStatus ? res?.status() !== wantStatus : !res?.ok()) {
       console.log(`FAIL ${screen} ${vp.name} ${url} -> ${res?.status()}`);
       await ctx.close();
       continue;
@@ -143,6 +170,22 @@ for (const [screen, path] of rows) {
     await page.evaluate(() => document.fonts.ready);
     await page.waitForLoadState("networkidle").catch(() => {});
     await page.waitForTimeout(400);
+    // State steps (menus, accordions, toggles, form outcomes), applied after the page settles.
+    for (const [k, v] of o) {
+      if (k === "click")
+        await page.locator(v).first().click({ timeout: 10000 });
+      else if (k === "fill") {
+        const [sel, text] = v.split("|");
+        await page.locator(sel).first().fill(text);
+      } else if (k === "open")
+        await page.evaluate((sel) => {
+          for (const d of document.querySelectorAll(sel)) d.open = true;
+        }, v);
+      else if (k === "press") await page.keyboard.press(v);
+      else if (k === "wait") await page.waitForTimeout(Number(v));
+    }
+    if (o.some(([k]) => ["click", "fill", "press", "open"].includes(k)))
+      await page.waitForTimeout(500);
     const out = { screen, path, viewport: vp, schemes: {}, rasters: 0 };
     for (const scheme of cfg.schemes) {
       await page.emulateMedia({ colorScheme: scheme, reducedMotion: "reduce" });

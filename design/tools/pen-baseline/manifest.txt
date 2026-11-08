@@ -9,3 +9,7 @@ docs                  /docs/
 docs-getting-started  /docs/getting-started/
 imprint               /imprint/
 # not-found (/404.html) is a copy of index.html (scripts/build-site.mjs), so it is the home frames.
+# States (row options: see capture.mjs). Widths: desktop 1440, tablet 834 (721–960 layout), small 600 (481–720),
+# mobile 390 (≤480); states at desktop and mobile, the nav menu where its toggle exists (≤720).
+home-faq-open         /  only=desktop,mobile  open=details.faq-item
+home-menu-open        /  only=small,mobile    click=.nav-toggle

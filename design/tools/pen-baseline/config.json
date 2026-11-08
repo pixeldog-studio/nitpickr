@@ -8,6 +8,16 @@
       "height": 900
     },
     {
+      "name": "tablet",
+      "width": 834,
+      "height": 1112
+    },
+    {
+      "name": "small",
+      "width": 600,
+      "height": 900
+    },
+    {
       "name": "mobile",
       "width": 390,
       "height": 844

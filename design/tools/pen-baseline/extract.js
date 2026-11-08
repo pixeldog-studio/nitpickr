@@ -494,6 +494,19 @@
       kids: [],
     };
     el.setAttribute("data-pen", node.id);
+    // Rotated/scaled boxes: the layout size and the matrix, so the builder can rotate instead of using the bbox.
+    if (cs.transform && cs.transform !== "none") {
+      const m = new DOMMatrix(cs.transform);
+      if (Math.abs(m.b) > 1e-4 || Math.abs(m.c) > 1e-4)
+        node.xf = {
+          a: m.a,
+          b: m.b,
+          c: m.c,
+          d: m.d,
+          w: el.offsetWidth,
+          h: el.offsetHeight,
+        };
+    }
     if (el.getAttribute("aria-label"))
       node.label = el.getAttribute("aria-label").slice(0, 60);
     if (tag === "img") {
