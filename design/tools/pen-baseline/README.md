@@ -13,7 +13,9 @@ token. Nothing here runs in CI; the app's own verify ignores it apart from lint/
    below the front matter is hand-written and kept.
 3. `node design/tools/pen-baseline/verify.mjs --pen design/<file>.pen --id <ticket> --scale 1` exports every frame
    through headless `pen interactive`, diffs each against its capture (`hq design diff`) and prints the binding
-   report. `node design/tools/pen-baseline/align-web.mjs <python with numpy+pillow>` gives per-element offsets.
+   report. `node design/tools/pen-baseline/align-web.mjs <python with numpy+pillow>` gives per-element offsets;
+   then `python3 design/tools/pen-baseline/shrink_exports.py design/exports/<ticket>` makes the committed previews
+   256-colour PNGs.
 
 | File | Role |
 |---|---|

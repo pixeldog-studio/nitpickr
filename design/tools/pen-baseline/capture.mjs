@@ -20,7 +20,10 @@ const design = resolve(here, "..", "..");
 const { chromium } = await import(
   process.env.PLAYWRIGHT_MODULE || "playwright"
 );
-const extractSrc = readFileSync(join(here, "extract.js"), "utf8");
+// extract.js is one arrow-function expression; a formatter may add a trailing semicolon.
+const extractSrc = readFileSync(join(here, "extract.js"), "utf8")
+  .trim()
+  .replace(/;$/, "");
 const cfg = JSON.parse(readFileSync(join(here, "config.json"), "utf8"));
 // manifest rows: <screen> <path> [note…]
 const rows = readFileSync(join(here, "manifest.txt"), "utf8")
@@ -84,7 +87,7 @@ const assets = async (page, node, ctx, out) => {
   const raster =
     node.raster ||
     (node.svg && (node.svg.complex || !node.svg.shapes.length)) ||
-    (node.asset && /\.(avif|gif|bin)$/.test(node.asset));
+    (node.asset && /\.(avif|gif|bin|svg)$/.test(node.asset));
   if (raster && node.rect.w >= 1 && node.rect.h >= 1) {
     const el = page.locator(`[data-pen="${node.id}"]`).first();
     const buf = await el

@@ -6,8 +6,8 @@ colorSpace: srgb # computed sRGB values of the CSS the pages render (display-p3 
 # code's CSS custom properties. `literal-*` colours and value-named numbers have no custom property: open questions.
 colors:
   text-soft: "#5F574F"  # 485 use(s)
-  text: "#1D1915"  # 423 use(s)
   line: "#1F19131C"  # 414 use(s)
+  text: "#1D1915"  # 411 use(s)
   surface: "#FFFFFFB8"  # 42 use(s)
   line-strong: "#1F19132E"  # 28 use(s)
   text-muted: "#84796D"  # 24 use(s)
@@ -37,9 +37,9 @@ colors:
   literal-FFFFFF1F: "#FFFFFF1F"  # 2 use(s), no custom property, gradient stop or page background
 typography:
   families:
-    ibm-plex-sans: "IBM Plex Sans"  # 637 text node(s)
+    ibm-plex-sans: "IBM Plex Sans"  # 629 text node(s)
     space-grotesk: "Space Grotesk"  # 176 text node(s)
-    ibm-plex-mono: "IBM Plex Mono"  # 118 text node(s)
+    ibm-plex-mono: "IBM Plex Mono"  # 114 text node(s)
 fontSize:
   "12_36": 12.36  # 1 use(s)
   "12_48": 12.48  # 22 use(s)
@@ -51,7 +51,7 @@ fontSize:
   "14_4": 14.4  # 70 use(s)
   "14_72": 14.72  # 152 use(s)
   "15_2": 15.2  # 14 use(s)
-  "16": 16  # 431 use(s)
+  "16": 16  # 419 use(s)
   "16_64": 16.64  # 3 use(s)
   "17_28": 17.28  # 7 use(s)
   "17_92": 17.92  # 3 use(s)
@@ -68,13 +68,13 @@ fontSize:
   "83_2": 83.2  # 6 use(s)
   "92_8": 92.8  # 2 use(s)
 fontWeight:
-  "400": "400"  # 675 use(s)
+  "400": "400"  # 665 use(s)
   "600": "600"  # 92 use(s)
-  "700": "700"  # 164 use(s)
+  "700": "700"  # 162 use(s)
 lineHeight:
   "0_96": 0.96  # 134 use(s)
   "1_55": 1.55  # 200 use(s)
-  "1_65": 1.65  # 489 use(s)
+  "1_65": 1.65  # 477 use(s)
 letterSpacing:
   "-3_71": -3.71  # 2 use(s)
   "-3_33": -3.33  # 6 use(s)
@@ -120,12 +120,10 @@ spacing:
   "18_4": 18.4  # 84 use(s)
   "18_79": 18.79  # 8 use(s), from layout (margins/offsets), no CSS property
   "19_2": 19.2  # 75 use(s)
-  "19_4": 19.4  # 18 use(s), from layout (margins/offsets), no CSS property
+  "19_4": 19.4  # 16 use(s), from layout (margins/offsets), no CSS property
   "20": 20  # 16 use(s)
-  "20_2": 20.2  # 1 use(s), from layout (margins/offsets), no CSS property
   "21_6": 21.6  # 6 use(s)
   "22_4": 22.4  # 9 use(s)
-  "22_6": 22.6  # 1 use(s), from layout (margins/offsets), no CSS property
   "24": 24  # 14 use(s)
   "27_2": 27.2  # 52 use(s)
   "28_2": 28.2  # 24 use(s), from layout (margins/offsets), no CSS property
@@ -193,10 +191,10 @@ Code wins ties: `website/styles.css` is the source of truth.
 
 ## Open questions
 
-- 21 `literal-*` colours have no custom property: mostly `--text`'s ink (#1F1913) at 3–18% alpha for rules and
+- 20 `literal-*` colours have no custom property: mostly `--text`'s ink (#1F1913) at 3–18% alpha for rules and
   table stripes, white at several alphas for glass, and the page-background gradient stops. Should they become
   properties (`--line-faint`, `--glass`…) so the site and the Pen file share names?
-- Spacing and type have no scale: 50+ spacing values and 25 font sizes come from `rem` maths and `clamp()`. A
+- Spacing and type have no scale: 54 spacing values and 26 font sizes come from `rem` maths and `clamp()`. A
   4/8 px spacing scale and a fixed type ramp would make the design file much smaller.
 - Values marked "from layout" are gaps made of margins (no gap property); they bind but aren't design decisions.
 - `--accent-soft` is defined but nothing renders it.

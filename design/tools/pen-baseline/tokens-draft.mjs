@@ -4,7 +4,7 @@
 // border value in use, named after the code's custom properties where one matches. Values with no custom
 // property are listed with a value-derived name and counted, so DESIGN.md can flag them as open questions.
 // Usage: node design/tools/pen-baseline/tokens-draft.mjs [--write]   (--write replaces DESIGN.md's front matter)
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -13,11 +13,13 @@ import {
   colorName,
   loadExtracts,
   numberName,
+  setFontMap,
 } from "./usage.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const design = resolve(here, "..", "..");
 const cfg = JSON.parse(readFileSync(join(here, "config.json"), "utf8"));
+setFontMap(cfg.fontMap);
 const extracts = loadExtracts(design);
 const vars = codeVars(extracts, cfg.schemes);
 const use = collectUsage(extracts, cfg.schemes);
@@ -52,7 +54,33 @@ out.push(
 out.push(
   "# code's CSS custom properties. `literal-*` colours and value-named numbers have no custom property: open questions.",
 );
-out.push("colors:");
+// Tailwind v4 sites: `hq design tokens-check` compares DESIGN.md `colors:` with the hex `--color-*` entries of the
+// source `@theme` blocks, both ways. So `colors:` holds exactly those (rendered or not), and every other colour the
+// pages render (Tailwind's built-in palette, rgba @theme values, literals) goes to `colorsExtra:`, which the Pen
+// variables read too. Sites without @theme keep everything in `colors:`.
+const themeHex = new Map();
+const scanCss = (dir) => {
+  if (!existsSync(dir)) return;
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (
+      e.name.startsWith(".") ||
+      e.name === "node_modules" ||
+      e.name === "dist"
+    )
+      continue;
+    const p = join(dir, e.name);
+    if (e.isDirectory()) scanCss(p);
+    else if (e.name.endsWith(".css"))
+      for (const b of readFileSync(p, "utf8").matchAll(
+        /@theme[^{]*\{([^}]*)\}/g,
+      ))
+        for (const m of b[1].matchAll(
+          /--color-([\w-]+)\s*:\s*(#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)\s*;/g,
+        ))
+          themeHex.set(m[1], m[2].toUpperCase());
+  }
+};
+scanCss(join(design, "..", cfg.cssDir || "src"));
 const colorEntries = [...use.colors.entries()]
   .map(([k, n]) => [colorName(k, vars), k, n])
   .sort(
@@ -60,19 +88,47 @@ const colorEntries = [...use.colors.entries()]
       a[0].startsWith("literal") - b[0].startsWith("literal") || b[2] - a[2],
   );
 const seen = new Set();
+const line = (name, key, note) => {
+  const [l, dk] = key.split("|");
+  return `  ${name}: ${l === dk ? q(l) : `{ light: ${q(l)}, dark: ${q(dk)} }`}  # ${note}`;
+};
+const main = [];
+const extra = [];
 for (const [name, key, n] of colorEntries) {
   if (seen.has(name)) continue;
   seen.add(name);
-  const [l, d] = key.split("|");
-  out.push(
-    `  ${name}: ${l === d ? q(l) : `{ light: ${q(l)}, dark: ${q(d)} }`}  # ${n} use(s)${name.startsWith("literal") ? ", no custom property" : ""}${derived.has(`c:${key}`) ? ", gradient stop or page background" : ""}`,
+  const note = `${n} use(s)${name.startsWith("literal") ? ", no custom property" : ""}${derived.has(`c:${key}`) ? ", gradient stop or page background" : ""}`;
+  if (!themeHex.size || themeHex.has(name)) main.push(line(name, key, note));
+  else
+    extra.push(
+      line(
+        name,
+        key,
+        `${note}${name.startsWith("literal") ? "" : ", not a hex @theme colour of this repo"}`,
+      ),
+    );
+}
+for (const [name, hex] of themeHex) {
+  if (seen.has(name)) continue;
+  seen.add(name);
+  main.push(
+    line(
+      name,
+      `${hex}|${hex}`,
+      "defined in @theme, not rendered on the captured pages",
+    ),
   );
 }
+out.push("colors:", ...main);
+if (extra.length) out.push("colorsExtra:", ...extra);
 out.push("typography:", "  families:");
 const fam = [...use.fonts.entries()].sort((a, b) => b[1] - a[1]);
 for (const [f, n] of fam)
   out.push(
-    `    ${f.toLowerCase().replace(/[^a-z0-9]+/g, "-")}: ${q(f)}  # ${n} text node(s)`,
+    `    ${f
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")}: ${q(f)}  # ${n} text node(s)`,
   );
 const section = (title, key, map, fmt = (v) => v) => {
   out.push(`${title}:`);

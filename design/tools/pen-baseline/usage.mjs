@@ -35,6 +35,28 @@ export const firstFamily = (ff) =>
     .trim()
     .replace(/^["']|["']$/g, "");
 
+// The family Pen should use: config.json "fontMap" maps a CSS family (e.g. -apple-system) to the font the browser
+// actually draws, either a name or { text, display, switchAt } for Apple's optical split (Text below 20 px).
+let fontMap = {};
+export const setFontMap = (m) => {
+  fontMap = m || {};
+};
+export const penFamily = (ff, size) => {
+  const f = firstFamily(ff);
+  const m = fontMap[f];
+  if (!m) return f;
+  if (typeof m === "string") return m;
+  if (m.opsz) {
+    // One instance per optical size (design/fonts/install-sf.sh): the listed size nearest to the font size.
+    const want = Math.max(m.opsz[0], Math.round(size));
+    const pick = m.opsz.reduce((a, b) =>
+      Math.abs(b - want) < Math.abs(a - want) ? b : a,
+    );
+    return `${m.prefix}${pick}`;
+  }
+  return size >= (m.switchAt || 20) ? m.display : m.text;
+};
+
 // Pairs light and dark nodes by extractor id (the DOM is the same; only colours change).
 export function indexTree(tree) {
   const m = new Map();
@@ -48,7 +70,7 @@ export function indexTree(tree) {
 
 // Every colour use as a light|dark pair, plus numeric uses per section.
 export function collectUsage(extracts, schemes) {
-  const dark = schemes.includes("dark");
+  const dark = schemes.length > 1 && schemes.includes("dark");
   const colors = new Map(); // "L|D" -> count
   const num = {
     spacing: new Map(),
@@ -102,7 +124,7 @@ export function collectUsage(extracts, schemes) {
             num.lineHeight,
             Math.round((s.lineHeight / s.fontSize) * 1000) / 1000,
           );
-        bump(fonts, firstFamily(s.fontFamily));
+        bump(fonts, penFamily(s.fontFamily, s.fontSize));
       }
       for (const k of n.kids || []) if (k.text === undefined) walk(k);
     };

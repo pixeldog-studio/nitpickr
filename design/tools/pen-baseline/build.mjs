@@ -10,18 +10,25 @@
 //  - Header and footer subtrees that repeat across pages become components (instances on every other page).
 // Pen ignores $variables on width/height (pen 0.3.14), so sizes are literal measured numbers.
 // Usage: node design/tools/pen-baseline/build.mjs
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { penVariables } from "./tokens.mjs";
 import {
   codeVars,
   colorName,
-  firstFamily,
   indexTree,
   loadExtracts,
   numberName,
+  penFamily,
   r2,
+  setFontMap,
 } from "./usage.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -30,10 +37,12 @@ const repo = resolve(design, "..");
 const cfg = JSON.parse(readFileSync(join(here, "config.json"), "utf8"));
 const ID = cfg.id;
 const { variables } = penVariables(repo);
+setFontMap(cfg.fontMap);
 const extracts = loadExtracts(design);
 const cvars = codeVars(extracts, cfg.schemes);
 const tw = cvars.find((v) => v.name === "--spacing" && v.px)?.px || null;
-const DARK = cfg.schemes.includes("dark");
+// Dark instances only when both schemes were captured (a dark-only site captures "dark" as its one scheme).
+const DARK = cfg.schemes.length > 1 && cfg.schemes.includes("dark");
 const misses = new Map();
 const miss = (what) => misses.set(what, (misses.get(what) || 0) + 1);
 const unbound = { colors: {}, numbers: {} };
@@ -83,9 +92,12 @@ const weightVar = (w) => {
   miss(`fontWeight ${w}`);
   return String(w);
 };
-const familyVar = (ff) => {
-  const f = firstFamily(ff);
-  const n = `font-${f.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+const familyVar = (ff, size) => {
+  const f = penFamily(ff, size);
+  const n = `font-${f
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")}`;
   if (has(n)) return `$${n}`;
   miss(`font ${f}`);
   return f;
@@ -171,6 +183,8 @@ function fillsOf(n, d) {
 }
 // rgb()/rgba() inside gradients -> hex (computed styles are always rgb/rgba or color())
 function cssColor(c) {
+  if (/^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$/.test(c || ""))
+    return c.toUpperCase();
   const m = /rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/.exec(
     c,
   );
@@ -233,7 +247,7 @@ function radiusOf(s, w, h) {
 const textStyle = (s, ds) => {
   const t = {
     fill: colorVar(s.color, ds.color),
-    fontFamily: familyVar(s.fontFamily),
+    fontFamily: familyVar(s.fontFamily, s.fontSize),
     fontSize: numVar("fontSize", s.fontSize),
     fontWeight: weightVar(s.fontWeight),
   };
@@ -304,33 +318,29 @@ function textNodes(run, el, d, origin, paragraph) {
       },
     ];
   }
-  // Mixed inline content: split the run's text across its lines by measured width share (approximate),
-  // one positioned text per line.
-  const words = text.split(/(\s+)/);
-  const total = lines.reduce((a, q) => a + q.w, 0);
+  // Mixed inline content: one positioned text per line, with the words the browser put on that line
+  // (extract.js measures each word).
+  const tt = (x) =>
+    s.textTransform === "uppercase"
+      ? x.toUpperCase()
+      : s.textTransform === "lowercase"
+        ? x.toLowerCase()
+        : x;
   const out = [];
-  let wi = 0;
-  lines.forEach((q, li) => {
-    const share = Math.round((q.w / total) * text.length);
-    let chunk = "";
-    while (
-      wi < words.length &&
-      (chunk.length < share || li === lines.length - 1)
-    )
-      chunk += words[wi++];
-    chunk = chunk.trim();
-    if (chunk)
-      out.push({
-        type: "text",
-        id: nid("t"),
-        name: chunk.slice(0, 40),
-        content: chunk,
-        ...st,
-        x: r2(q.x - origin.x),
-        y: r2(q.y - origin.y),
-        _box: q,
-      });
-  });
+  for (const q of lines) {
+    const chunk = tt(q.text || "").trim();
+    if (!chunk) continue;
+    out.push({
+      type: "text",
+      id: nid("t"),
+      name: chunk.slice(0, 40),
+      content: chunk,
+      ...st,
+      x: r2(q.x - origin.x),
+      y: r2(q.y - origin.y),
+      _box: q,
+    });
+  }
   return out;
 }
 
@@ -1015,10 +1025,28 @@ for (const [, list] of byScreen) {
   x += colW + 200;
 }
 
+// Fonts Pen loads from design/fonts: config "fonts", plus one variable-weight entry per opsz instance.
+const opszFonts = Object.values(cfg.fontMap || {})
+  .filter((m) => m?.opsz)
+  .flatMap((m) =>
+    m.opsz.map((o) => ({
+      name: `${m.prefix}${o}`,
+      url: `fonts/${m.file.replace("{opsz}", o)}`,
+      weight: m.wght || [100, 900],
+      axes: [
+        {
+          tag: "wght",
+          start: (m.wght || [100, 900])[0],
+          end: (m.wght || [100, 900])[1],
+        },
+      ],
+    })),
+  );
+const allFonts = [...(cfg.fonts || []), ...opszFonts];
 const doc = {
   version: "2.21",
   themes: { mode: ["light", "dark"] },
-  ...(cfg.fonts ? { fonts: cfg.fonts } : {}),
+  ...(allFonts.length ? { fonts: allFonts } : {}),
   variables,
   children,
 };
@@ -1030,6 +1058,20 @@ console.log(
 console.log(
   `containers: ${stats.layout} auto-layout, ${stats.absolute} measured positions`,
 );
+// design/images is written only by capture.mjs: drop files no frame references any more (older captures).
+const json = JSON.stringify(doc);
+const imgDir = join(design, "images");
+let pruned = 0;
+if (existsSync(imgDir)) {
+  for (const f of readdirSync(imgDir)) {
+    if (!json.includes(`images/${f}`)) {
+      unlinkSync(join(imgDir, f));
+      pruned++;
+    }
+  }
+}
+if (pruned)
+  console.log(`pruned ${pruned} unreferenced image(s) from design/images`);
 // Accumulates across runs so the next tokens-draft keeps them (delete .refs/unbound.json to start over).
 const ubFile = join(design, ".refs", "unbound.json");
 const prev = existsSync(ubFile)
