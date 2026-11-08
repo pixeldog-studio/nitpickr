@@ -171,18 +171,28 @@ for (const [screen, path, ...rest] of rows) {
     await page.waitForLoadState("networkidle").catch(() => {});
     await page.waitForTimeout(400);
     // State steps (menus, accordions, toggles, form outcomes), applied after the page settles.
-    for (const [k, v] of o) {
-      if (k === "click")
-        await page.locator(v).first().click({ timeout: 10000 });
-      else if (k === "fill") {
-        const [sel, text] = v.split("|");
-        await page.locator(sel).first().fill(text);
-      } else if (k === "open")
-        await page.evaluate((sel) => {
-          for (const d of document.querySelectorAll(sel)) d.open = true;
-        }, v);
-      else if (k === "press") await page.keyboard.press(v);
-      else if (k === "wait") await page.waitForTimeout(Number(v));
+    let stepError = null;
+    try {
+      for (const [k, v] of o) {
+        if (k === "click")
+          await page.locator(v).first().click({ timeout: 10000 });
+        else if (k === "fill") {
+          const [sel, text] = v.split("|");
+          await page.locator(sel).first().fill(text);
+        } else if (k === "open")
+          await page.evaluate((sel) => {
+            for (const d of document.querySelectorAll(sel)) d.open = true;
+          }, v);
+        else if (k === "press") await page.keyboard.press(v);
+        else if (k === "wait") await page.waitForTimeout(Number(v));
+      }
+    } catch (err) {
+      stepError = err.message.split("\n")[0];
+    }
+    if (stepError) {
+      console.log(`FAIL ${screen} ${vp.name}: state step failed: ${stepError}`);
+      await ctx.close();
+      continue;
     }
     if (o.some(([k]) => ["click", "fill", "press", "open"].includes(k)))
       await page.waitForTimeout(500);

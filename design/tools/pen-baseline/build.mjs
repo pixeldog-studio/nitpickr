@@ -295,24 +295,42 @@ function textNodes(run, el, d, origin, paragraph) {
       y0 = lines[0].y;
     const right = el.rect.x + el.rect.w - s.padding[1] - s.border[1];
     const left = el.rect.x + s.padding[3] + s.border[3];
-    const w = r2(right - left + 0.5);
     const align = {
       center: "center",
       right: "right",
       end: "right",
       justify: "justify",
     }[s.textAlign];
+    // The browser's own line breaks (extract.js measures each word) go into the content as newlines, so Pen
+    // can't re-wrap a heading differently; 8 px of slack keeps a slightly wider Pen line from wrapping again.
+    const tf = (x) =>
+      s.textTransform === "uppercase"
+        ? x.toUpperCase()
+        : s.textTransform === "lowercase"
+          ? x.toLowerCase()
+          : x;
+    const broken = lines.every((q) => q.text)
+      ? lines.map((q) => tf(q.text)).join("\n")
+      : null;
+    const slack = broken ? 8 : 0;
+    const w = r2(right - left + 0.5 + slack);
+    const shift =
+      align === "center" ? slack / 2 : align === "right" ? slack : 0;
     return [
       {
         type: "text",
         id: nid("t"),
         name: text.slice(0, 40),
-        content: text,
+        content: broken || text,
         ...st,
         textGrowth: "fixed-width",
         width: w,
-        ...(align ? { textAlign: align } : {}),
-        x: r2(left - origin.x),
+        ...(align && align !== "justify"
+          ? { textAlign: align }
+          : align === "justify" && !broken
+            ? { textAlign: align }
+            : {}),
+        x: r2(left - shift - origin.x),
         y: r2(y0 - origin.y),
         _box: { x: left, y: y0, w, h: lines.at(-1).y + lines.at(-1).h - y0 },
       },
@@ -448,8 +466,15 @@ function rotate(node, n, origin) {
   const cy = n.rect.y + n.rect.h / 2;
   const x = cx + Math.cos(th) * (-w / 2) - Math.sin(th) * (-h / 2);
   const y = cy + Math.sin(th) * (-w / 2) + Math.cos(th) * (-h / 2);
+  // Children drawn to the old (bounding-box) size, like an SVG's paths, take the layout size too.
+  const children = node.children?.map((c) =>
+    c.x === 0 && c.y === 0 && c.width === node.width && c.height === node.height
+      ? { ...c, width: r2(w), height: r2(h) }
+      : c,
+  );
   return {
     ...node,
+    ...(children ? { children } : {}),
     x: r2(x - origin.x),
     y: r2(y - origin.y),
     width: r2(w),
@@ -459,6 +484,20 @@ function rotate(node, n, origin) {
 }
 
 function convert(n, D, origin, ctx) {
+  // A rotated wrapper around one same-size child (an icon in a span): rotate the child instead.
+  const only = (n.kids || []).filter((k) => k.text === undefined);
+  if (
+    n.xf &&
+    only.length === 1 &&
+    (n.kids || []).length === 1 &&
+    !only[0].xf &&
+    Math.abs(only[0].rect.w - n.rect.w) < 1 &&
+    Math.abs(only[0].rect.h - n.rect.h) < 1 &&
+    !(only[0].kids || []).length
+  ) {
+    only[0].xf = n.xf;
+    n.xf = null;
+  }
   const d = D ? D.get(n.id) : null;
   const s = n.s,
     r = n.rect;
@@ -771,12 +810,13 @@ for (const ex of extracts) {
     height: L.height,
     clip: true,
     layout: "none",
+    // No page background in CSS: the browser paints its default white canvas.
     fill: bg
       ? colorVar(
           bg,
           DARK ? ex.schemes.dark.bodyBg || ex.schemes.dark.htmlBg : bg,
         )
-      : undefined,
+      : colorVar("#FFFFFF", "#FFFFFF"),
     children: body.children ? [{ ...body, name: "body" }] : [],
   };
   // Shared chrome: identical header/footer subtrees become components.

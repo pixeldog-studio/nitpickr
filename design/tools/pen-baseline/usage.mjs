@@ -41,9 +41,18 @@ let fontMap = {};
 export const setFontMap = (m) => {
   fontMap = m || {};
 };
+// Browser default faces Pen doesn't have: their metric-compatible Google fonts.
+const DEFAULT_FACES = {
+  Times: "Tinos",
+  "Times New Roman": "Tinos",
+  Arial: "Arimo",
+  Helvetica: "Arimo",
+  "Courier New": "Cousine",
+  Courier: "Cousine",
+};
 export const penFamily = (ff, size) => {
   const f = firstFamily(ff);
-  const m = fontMap[f];
+  const m = fontMap[f] || DEFAULT_FACES[f];
   if (!m) return f;
   if (typeof m === "string") return m;
   if (m.opsz) {

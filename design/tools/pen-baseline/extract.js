@@ -495,16 +495,25 @@
     };
     el.setAttribute("data-pen", node.id);
     // Rotated/scaled boxes: the layout size and the matrix, so the builder can rotate instead of using the bbox.
-    if (cs.transform && cs.transform !== "none") {
-      const m = new DOMMatrix(cs.transform);
-      if (Math.abs(m.b) > 1e-4 || Math.abs(m.c) > 1e-4)
+    // transform plus the standalone rotate property (Tailwind v4's rotate-* utilities use it).
+    const rotDeg =
+      cs.rotate && cs.rotate !== "none"
+        ? parseFloat(cs.rotate.split(" ").pop())
+        : 0;
+    if ((cs.transform && cs.transform !== "none") || rotDeg) {
+      let m =
+        cs.transform && cs.transform !== "none"
+          ? new DOMMatrix(cs.transform)
+          : new DOMMatrix();
+      if (rotDeg) m = new DOMMatrix().rotate(rotDeg).multiply(m);
+      if (Math.abs(m.b) > 1e-4 || Math.abs(m.c) > 1e-4 || m.a < 0 || m.d < 0)
         node.xf = {
           a: m.a,
           b: m.b,
           c: m.c,
           d: m.d,
-          w: el.offsetWidth,
-          h: el.offsetHeight,
+          w: el.offsetWidth ?? el.width?.baseVal?.value ?? r.width,
+          h: el.offsetHeight ?? el.height?.baseVal?.value ?? r.height,
         };
     }
     if (el.getAttribute("aria-label"))
