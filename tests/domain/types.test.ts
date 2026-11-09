@@ -101,6 +101,12 @@ describe("domain types", () => {
         budgets: { ...skipped.budgets, maxFiles: -1 },
       }),
     ).toThrow(/maxFiles/);
+    expect(() =>
+      parseReviewRun({
+        ...skipped,
+        budgets: { ...skipped.budgets, maxComments: -1 },
+      }),
+    ).toThrow(/maxComments/);
   });
 
   it("parses a review run with budgets", () => {

@@ -214,6 +214,55 @@ describe("PostgresReviewLifecycleStore", () => {
     expect(client.calls[0]?.query).toContain("completed_at desc");
   });
 
+  it("loads a skipped latest review run stored with zero file and comment budgets", async () => {
+    // A push with no reviewable files stores this row; the next push reads it
+    // back before planning. It used to throw, failing every later review (#42).
+    const client = new FakePostgresClient();
+    client.unsafe = async <T extends Record<string, unknown>>(
+      query: string,
+      params?: readonly unknown[],
+    ): Promise<T[]> => {
+      client.calls.push({ query, params });
+      return [
+        {
+          id: "review_run_skipped",
+          tenant_id: "github-installation:123456",
+          repository_id: "github:99",
+          change_request_id: "github:99:42",
+          trigger: JSON.stringify({
+            type: "pr_synchronized",
+            actorLogin: "ruben",
+          }),
+          mode: "quick",
+          scope: "commit_delta",
+          head_sha: "dddddddddddddddddddddddddddddddddddddddd",
+          compared_from_sha: "cccccccccccccccccccccccccccccccccccccccc",
+          status: "skipped",
+          budgets: JSON.stringify({
+            maxFiles: 0,
+            maxHunks: 200,
+            maxTokens: 120000,
+            maxComments: 0,
+            maxDurationMs: 300000,
+          }),
+          created_at: "2026-11-08T20:56:09.091Z",
+          updated_at: "2026-11-08T20:56:12.000Z",
+          completed_at: "2026-11-08T20:56:12.000Z",
+        } as unknown as T,
+      ];
+    };
+    const store = new PostgresReviewLifecycleStore(client);
+
+    const run = await store.findLatestCompletedReviewRun("github:99:42");
+
+    expect(run).toMatchObject({
+      id: "review_run_skipped",
+      status: "skipped",
+      headSha: "dddddddddddddddddddddddddddddddddddddddd",
+      budgets: { maxFiles: 0, maxComments: 0 },
+    });
+  });
+
   it("counts only published/skipped review runs for a change request", async () => {
     const client = new FakePostgresClient();
     client.unsafe = async <T extends Record<string, unknown>>(
