@@ -59,10 +59,14 @@ const reviewTriggerSchema = z.discriminatedUnion("type", [
 ]);
 
 const reviewBudgetsSchema = z.object({
-  maxFiles: z.number().int().positive(),
+  // A run that found no reviewable files (e.g. a push that only merged the base
+  // branch) is stored as skipped with 0 files and 0 comments. It must parse when
+  // read back as the latest completed review, or every later review of that PR
+  // fails (#42).
+  maxFiles: z.number().int().nonnegative(),
   maxHunks: z.number().int().positive(),
   maxTokens: z.number().int().positive(),
-  maxComments: z.number().int().positive(),
+  maxComments: z.number().int().nonnegative(),
   maxDurationMs: z.number().int().positive(),
 });
 
