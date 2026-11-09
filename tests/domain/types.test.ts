@@ -68,6 +68,41 @@ describe("domain types", () => {
     ).toThrow(/baseSha/i);
   });
 
+  it("parses a skipped review run with zero file and comment budgets", () => {
+    // Stored when a push had no reviewable files; read back as the latest
+    // completed review on the next push, so it must parse (#42).
+    const skipped = {
+      id: "run_0",
+      tenantId: "tenant_1",
+      repositoryId: "repo_1",
+      changeRequestId: "cr_1",
+      trigger: { type: "pr_synchronized", actorLogin: "ruben" },
+      mode: "quick",
+      scope: "commit_delta",
+      headSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      comparedFromSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      status: "skipped",
+      budgets: {
+        maxFiles: 0,
+        maxHunks: 200,
+        maxTokens: 120000,
+        maxComments: 0,
+        maxDurationMs: 300000,
+      },
+    };
+    const reviewRun = parseReviewRun(skipped);
+
+    expect(reviewRun.status).toBe("skipped");
+    expect(reviewRun.budgets.maxFiles).toBe(0);
+    expect(reviewRun.budgets.maxComments).toBe(0);
+    expect(() =>
+      parseReviewRun({
+        ...skipped,
+        budgets: { ...skipped.budgets, maxFiles: -1 },
+      }),
+    ).toThrow(/maxFiles/);
+  });
+
   it("parses a review run with budgets", () => {
     const reviewRun = parseReviewRun({
       id: "run_1",
